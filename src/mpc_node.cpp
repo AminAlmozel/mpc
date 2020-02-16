@@ -8,6 +8,7 @@
 
 #include "std_msgs/String.h"
 #include "std_msgs/Bool.h"
+#include "nav_msgs/Path.h"
 
 #include <iostream>
 #include <sstream>
@@ -19,84 +20,84 @@ using namespace std;
 
 #define f 10.0
 
-class seibr {       // Iterative Best Response
+class mpc {       // Iterative Best Response
 public: // Access specifier
-    seibr(ros::NodeHandle* node){
+    mpc(ros::NodeHandle* node){
 
-      pub = node->advertise<std_msgs::String>("gtp_path", 2);
-      sub = node->subscribe("ptp", 10, &seibr::gtp_main, this);
-    
-      // Adding the optimization variables
-      //l = model.addVar(llb, lub, NULL, GRB_INTEGER, "l");
-      l = model.addVar(llb, lub, 0.0, GRB_INTEGER);
       
-      // Setting up the variable type (continuous, integer, ...) and the variable constraints
+        sub = node->subscribe("gtp", 10, &mpc::mpcCallback, this);
+        pub = node->advertise<std_msgs::String>("gtp_path", 2);
+        // Adding the optimization variables
+        
+        // Setting up the variable type (continuous, integer, ...) and the variable constraints
 
-      for (int i = 0; i < n_st * N; i++) {
-          xtype[i] = GRB_CONTINUOUS;
-          xlb[i] = -GRB_INFINITY;
-          xub[i] = GRB_INFINITY;
-      }
+        for (int i = 0; i < n_st * N; i++) {
+            xtype[i] = GRB_CONTINUOUS;
+            xlb[i] = -GRB_INFINITY;
+            xub[i] = GRB_INFINITY;
+        }
 
 
-      // TODO: give proper values for the boundaries
-      for (int i = 0; i < n_con * N; i++) {
-          utype[i] = GRB_CONTINUOUS;
-          if (i % n_con == 1) {
-              ulb[i] = 0;
-              uub[i] = 1;
-          }
-          if (i % n_con == 2) {
-              ulb[i] = 0;
-              uub[i] = 1;
-          }
-          if (i % n_con == 3) {
-              ulb[i] = 0;
-              uub[i] = 1;
-          }
-          if (i % n_con == 0) {
-              ulb[i] = 0;
-              uub[i] = 1;
-          }
+        // TODO: give proper values for the boundaries
+        for (int i = 0; i < n_con * N; i++) {
+            utype[i] = GRB_CONTINUOUS;
+            if (i % n_con == 1) {
+                ulb[i] = 0;
+                uub[i] = 1;
+            }
+            if (i % n_con == 2) {
+                ulb[i] = 0;
+                uub[i] = 1;
+            }
+            if (i % n_con == 3) {
+                ulb[i] = 0;
+                uub[i] = 1;
+            }
+            if (i % n_con == 0) {
+                ulb[i] = 0;
+                uub[i] = 1;
+            }
 
-      }
+        }
 
-      // Adding the variables, and setting constraints on the variables
-      x = model.addVars(xlb, xub, NULL, xtype, NULL, (int)n_st * N);
-      u = model.addVars(ulb, uub, NULL, utype, NULL, (int)n_con * N);
+        // Adding the variables, and setting constraints on the variables
+        x = model.addVars(xlb, xub, NULL, xtype, NULL, (int)n_st * N);
+        u = model.addVars(ulb, uub, NULL, utype, NULL, (int)n_con * N);
 
-      // Adding the model constraints
-      //lquadModel();
-      kineticModel();
-      
-      // Initilizing to 0's for the first iteration
-      for (int i = 0; i < 3 * N; i++) {
-          p[i] = 0;
-      }
-      for (int i = 0; i < N; i++) {
-          mu[i] = 0;
-      }
+        // Adding the model constraints
+        nlquadModel();
+        //lquadModel();
+        //kineticModel();
+        
+        /*
+        // Initilizing to 0's for the first iteration
+        for (int i = 0; i < 3 * N; i++) {
+            p[i] = 0;
+        }
+        for (int i = 0; i < N; i++) {
+            mu[i] = 0;
+        }
+        */
     }
 
     // Class methods
+    void mpcCallback(const nav_msgs::Path::ConstPtr& msg);
     void kineticModel(); // Simple acceleration model
     void nlquadModel(); // Nonlinear model
     void lquadModel(); // Linear model
-    void collision(seibr* opponent); // Initializing collision constraints
-    void gtp(seibr* opponent, double alpha, double* t, double* n, double k);
+    void collision(mpc* opponent); // Initializing collision constraints
+    void mpcSetup(const nav_msgs::Path::ConstPtr& path);
     double* getTraj();
 
     // Class attributes
     double dt = 1/f;
-    int64_t n_st = 6;
-    int64_t n_con = 3;
+    int64_t n_st = 12;
+    int64_t n_con = 4;
     GRBEnv* env = new GRBEnv();
     GRBModel model = GRBModel(*env);
-    GRBVar l;
+
     GRBVar* x;
     GRBVar* u;
-    double* p = new double[3 * N]{ 0 };
-    double* mu = new double[N]{ 0 };
 
     GRBQuadExpr obj = 0;
     double beta[3];
@@ -118,19 +119,21 @@ public: // Access specifier
 
     bool firstIteration = 1;
 
-    void gtp_main(const std_msgs::Bool::ConstPtr& msg);
 
-  private:
+
+private:
     int test;
     std::string st;
     //ros::NodeHandle* n;
     ros::Publisher pub;
     ros::Subscriber sub;
 
+    nav_msgs::Path path;
+
 
 };
 
-void seibr::nlquadModel() {
+void mpc::nlquadModel() {
     // INCOMPELETE
     // PLACEHOLDER
     double* x = 0;
@@ -179,7 +182,7 @@ void seibr::nlquadModel() {
 
 }
 
-void seibr::lquadModel() {
+void mpc::lquadModel() {
 
     // Constants
     double g = 9.81;
@@ -226,19 +229,19 @@ void seibr::lquadModel() {
     GRBLinExpr modelConstraint = 0;
     // x_t+1 = A*x_t + B*u_t ???
     for (int i = 0; i < N - 1; i++) {
-        for (int n = 0; n < seibr::n_st; n++) {
+        for (int n = 0; n < mpc::n_st; n++) {
             modelConstraint = 0;
-            for (int j = 0; j < seibr::n_st; j++) {
+            for (int j = 0; j < mpc::n_st; j++) {
                 if (A[n][j] != 0)
-                    modelConstraint += A[n][j] * seibr::x[i * n_st + j];
+                    modelConstraint += A[n][j] * mpc::x[i * n_st + j];
             }
-            for (int k = 0; k < seibr::n_con; k++) {
+            for (int k = 0; k < mpc::n_con; k++) {
                 if (B[n][k] != 0)
-                    modelConstraint += B[n][k] * seibr::u[i * n_con + k];
+                    modelConstraint += B[n][k] * mpc::u[i * n_con + k];
             }
             // Make sure of this 
             // (A*x_t + B*u_t) * dt + x_t - x_t+1 == 0
-            modelConstraint = modelConstraint * seibr::dt + seibr::x[i * n_st + n] - seibr::x[(i + 1) * n_st + n]; 
+            modelConstraint = modelConstraint * mpc::dt + mpc::x[i * n_st + n] - mpc::x[(i + 1) * n_st + n]; 
 
             /*
             printf("%f *", modelConstraint.getCoeff(0));
@@ -247,7 +250,7 @@ void seibr::lquadModel() {
             cout << modelConstraint.getVar(1).get(GRB_StringAttr_VarName) << endl;
             */
 
-            seibr::model.addConstr(modelConstraint == 0);
+            mpc::model.addConstr(modelConstraint == 0);
 
         }
 
@@ -255,7 +258,7 @@ void seibr::lquadModel() {
 
 }
 
-void seibr::kineticModel() {
+void mpc::kineticModel() {
     // WARNING: If you want to use this model be sure to change the n_st = 6, and n_con = 3, and change the state boundaries to limit the velocity, and input to limit acceleration
 
     double A[6][6] = { // Missing 2 g's somewhere
@@ -277,30 +280,31 @@ void seibr::kineticModel() {
     GRBLinExpr modelConstraint = 0;
     // x_t+1 = A*x_t + B*u_t ???
     for (int i = 0; i < N - 1; i++) {
-        for (int n = 0; n < seibr::n_st; n++) {
+        for (int n = 0; n < mpc::n_st; n++) {
             modelConstraint = 0;
-            for (int j = 0; j < seibr::n_st; j++) {
+            for (int j = 0; j < mpc::n_st; j++) {
                 if (A[n][j] != 0)
-                    modelConstraint += A[n][j] * seibr::x[i * n_st + j];
+                    modelConstraint += A[n][j] * mpc::x[i * n_st + j];
             }
-            for (int k = 0; k < seibr::n_con; k++) {
+            for (int k = 0; k < mpc::n_con; k++) {
                 if (B[n][k] != 0)
-                    modelConstraint += B[n][k] * seibr::u[i * n_con + k];
+                    modelConstraint += B[n][k] * mpc::u[i * n_con + k];
             }
             // Make sure of this 
             // (A*x_t + B*u_t) * dt + x_t - x_t+1 == 0
-            modelConstraint = modelConstraint * seibr::dt + seibr::x[i * n_st + n] - seibr::x[(i + 1) * n_st + n];
+            modelConstraint = modelConstraint * mpc::dt + mpc::x[i * n_st + n] - mpc::x[(i + 1) * n_st + n];
 
 
-            seibr::model.addConstr(modelConstraint == 0);
+            mpc::model.addConstr(modelConstraint == 0);
 
         }
 
     }
 }
 
-void seibr::collision(seibr* opponent) {
 
+void mpc::collision(mpc* opponent) {
+/*
     double d = 0.8;
     GRBQuadExpr colli_constraint = 0;
 
@@ -319,13 +323,52 @@ void seibr::collision(seibr* opponent) {
             (x[i * n_st + 1] - opponent->p[i * 3 + 1]) * (x[i * n_st + 1] - opponent->p[i * 3 + 1]) +
             (x[i * n_st + 2] - opponent->p[i * 3 + 2]) * (x[i * n_st + 2] - opponent->p[i * 3 + 2]);
 
-        colli_con[i] = seibr::model.addQConstr(colli_constraint >= d*d); // Using d*d instead of taking the square root
+        colli_con[i] = mpc::model.addQConstr(colli_constraint >= d*d); // Using d*d instead of taking the square root
     }
-    
+*/    
 }
 
-void seibr::gtp(seibr* opponent, double alpha, double* t, double* n, double k) {
+
+void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
     GRBQuadExpr obj = 0;
+    GRBLinExpr temp[3] = {0, 0, 0};
+
+    double Q[3][3] = 
+    {{1, 0, 0},
+    {0, 1, 0},
+    {0, 0, 1}};
+    int cols = 3;
+
+    // Constructing the objective
+    // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
+    for (int n = 0; n < N; n++){
+        temp[0] = x[n * n_st + 0] - path->poses[n].pose.position.x;
+        temp[1] = x[n * n_st + 1] - path->poses[n].pose.position.y;
+        temp[2] = x[n * n_st + 2] - path->poses[n].pose.position.z;
+        for (int i = 0; i < 3; i++){ // Quad part, 3 for x, y, z states
+            for (int j = 0; j < 3; j++){
+                if (Q[i][j] != 0){
+                    obj += Q[i][j]*temp[i]*temp[j];
+                }
+            }
+        }
+    }
+
+    model.setObjective(obj);
+
+    // Optimize
+    //model.update();
+    model.optimize();
+
+    // Save ego trajectory in p
+    for (int i = 0; i < N; i++) {
+        p[3 * i + 0] = x[n_st * i + 0].get(GRB_DoubleAttr_X);
+        p[3 * i + 1] = x[n_st * i + 1].get(GRB_DoubleAttr_X);
+        p[3 * i + 2] = x[n_st * i + 2].get(GRB_DoubleAttr_X);
+    }
+
+
+    /*
     double beta[3];
     double mag = 1;
 
@@ -363,45 +406,48 @@ void seibr::gtp(seibr* opponent, double alpha, double* t, double* n, double k) {
     for (int i = 0; i < N; i++) {
         mu[i] = colli_con[i].get(GRB_DoubleAttr_Slack);
     }
+    */
 }
 
-double* seibr::getTraj() {
+double* mpc::getTraj() {
     // Input a list of pose messages as a pointer
     // Fill up using p from the class
     // Return it?
     return 0;
 }
 
-void seibr::gtp_main(const std_msgs::Bool::ConstPtr& msg)
-{
-  //ROS_INFO("I heard: [%s]", msg->data.c_str());
-  std_msgs::String toSend;
+void mpc::mpcCallback(const nav_msgs::Path::ConstPtr& msg){
 
-  //std::stringstream ss;
-  //ss << "hello world ";
-  toSend.data = std::string("Helo world");
+    // TODO: Add collision constraints
+    //collision(); // Adding collision constraints
 
-  //ROS_INFO("%s", toSend.data.c_str());
-  if(msg->data){
+    mpcSetup(msg);
+    double* tra = getTraj();
+
+    //ROS_INFO("I heard: [%s]", msg->data.c_str());
+    std_msgs::String toSend;
+
+    //std::stringstream ss;
+    //ss << "hello world ";
+    toSend.data = std::string("Helo world");
+
+    //ROS_INFO("%s", toSend.data.c_str());
     pub.publish(toSend);
-  }
 
-  ros::spinOnce();
+    ros::spinOnce();
   
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]){
 
     int L = 5;
     double alpha = 1;
 
-    ros::init(argc, argv, "gtp");
+    ros::init(argc, argv, "mpc");
     ros::NodeHandle n;
 
-    seibr opponent = seibr(&n);
+    mpc ego = mpc(&n);
 
-    seibr ego = seibr(&n);
 
     ros::spin();
 
