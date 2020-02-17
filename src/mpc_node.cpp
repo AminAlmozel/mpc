@@ -20,6 +20,10 @@ using namespace std;
 
 #define f 10.0
 
+
+static double fx(double u) { return exp(u); }
+static double g(double u) { return sqrt(u); }
+
 class mpc {       // Iterative Best Response
 public: // Access specifier
     mpc(ros::NodeHandle* node){
@@ -65,8 +69,8 @@ public: // Access specifier
         u = model.addVars(ulb, uub, NULL, utype, NULL, (int)n_con * N);
 
         // Adding the model constraints
-        nlquadModel();
-        //lquadModel();
+        //nlquadModel();
+        lquadModel();
         //kineticModel();
         
         /*
@@ -88,6 +92,8 @@ public: // Access specifier
     void collision(mpc* opponent); // Initializing collision constraints
     void mpcSetup(const nav_msgs::Path::ConstPtr& path);
     double* getTraj();
+
+private:
 
     // Class attributes
     double dt = 1/f;
@@ -119,27 +125,20 @@ public: // Access specifier
 
     bool firstIteration = 1;
 
-
-
-private:
-    int test;
-    std::string st;
     //ros::NodeHandle* n;
     ros::Publisher pub;
     ros::Subscriber sub;
 
     nav_msgs::Path path;
 
-
 };
 
 void mpc::nlquadModel() {
     // INCOMPELETE
 
-    //GRBTempConstr* xdot = 0;
+    GRBQuadExpr xdot[3] = 0;
     GRBLinExpr xdotLin[6] = 0;
     GRBQuadExpr xdotQuad[3] = 0;
-
 
     // Constants
     double g = 9.81;
@@ -155,6 +154,22 @@ void mpc::nlquadModel() {
     double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
     double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
 
+    /*
+    // Change the lower bound, upper bound, and type
+    // Working around the nonlinearities by defining new variables 
+    GRBVar* cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+    GRBVar* sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+    for(int n = 0; n < N; n++){
+        model.addGenConstrSin(x[n * n_st + 6], sx[3 * n + 0]);
+        model.addGenConstrSin(x[n * n_st + 7], sx[3 * n + 1]);
+        model.addGenConstrSin(x[n * n_st + 8], sx[3 * n + 2]);
+
+        model.addGenConstrCos(x[n * n_st + 6], cx[3 * n + 0]);
+        model.addGenConstrCos(x[n * n_st + 7], cx[3 * n + 1]);
+        model.addGenConstrCos(x[n * n_st + 8], cx[3 * n + 2]); 
+    }
+    */
+
     for(int n = 0; n < N - 1; n++){ // The last time step is constraint to the time step before it
         //xd
         xdotLin[0] = x[n * n_st + 3];
@@ -164,6 +179,7 @@ void mpc::nlquadModel() {
         xdotLin[2] = x[n * n_st + 5];
         // xdd, horizontal
         //xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * cos(x[n * n_st + 8]) + sin(x[n * n_st + 6]) * sin(x[n * n_st + 8]));
+        //xdot[0] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cx[n * 3 + 0] * sx[n * 3 + 1] * cx[n * 3 + 2] + sx[n * 3 + 0] * sx[n * 3 + 2]);
         // ydd, horizontal
         //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 8]) * cos(x[n * n_st + 8]));
         // MAKE SURE OF THE - g
@@ -198,8 +214,19 @@ void mpc::nlquadModel() {
             mpc::model.addQConstr(modelConstraint == 0);
         }
 
-        // TODO
-        // Adding non linear constraints
+        /*
+        double intv = 1e-3;
+        double xmax = log(9.0);
+        int len = (int) ceil(xmax/intv) + 1;
+        double* xpts = new double[len];
+        double* upts = new double[len];
+        for (int i = 0; i < len; i++) {
+            xpts[i] = i*intv;
+            upts[i] = fx(i*intv);
+        }
+        model.addGenConstrPWL(x[0], u[0], len, xpts, upts, "gc1");
+        */
+
         /*
         for(int i = 0; i < n_st; i++){
             // Change to non linear
@@ -211,8 +238,8 @@ void mpc::nlquadModel() {
         */
     }
 
-
 }
+
 
 void mpc::lquadModel() {
 
@@ -258,22 +285,23 @@ void mpc::lquadModel() {
         {0, 0, l/Iy, 0},
         {0, 0, 0, l/Iz} };
 
-    GRBLinExpr modelConstraint = 0;
+    GRBLinExpr dx = 0;
     // x_t+1 = A*x_t + B*u_t ???
     for (int n = 0; n < N - 1; n++) {
         for (int i = 0; i < mpc::n_st; i++) {
-            modelConstraint = 0;
+            dx = 0;
             for (int j = 0; j < mpc::n_st; j++) {
                 if (A[i][j] != 0)
-                    modelConstraint += A[i][j] * mpc::x[n * n_st + j];
+                    dx += A[i][j] * mpc::x[n * n_st + j];
             }
             for (int k = 0; k < mpc::n_con; k++) {
                 if (B[i][k] != 0)
-                    modelConstraint += B[i][k] * mpc::u[n * n_con + k];
+                    dx += B[i][k] * mpc::u[n * n_con + k];
             }
             // Make sure of this 
-            // (A*x_t + B*u_t) * dt + x_t - x_t+1 == 0
-            modelConstraint = modelConstraint * mpc::dt + mpc::x[n * n_st + i] - mpc::x[(n + 1) * n_st + i]; 
+            // x_t+1 = x_t + (A*x_t + B*u_t) * dt
+            //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
+            mpc::model.addConstr(mpc::x[n * n_st + i] + dx * mpc::dt - mpc::x[(n + 1) * n_st + i]  == 0);
 
             /*
             printf("%f *", modelConstraint.getCoeff(0));
@@ -282,7 +310,7 @@ void mpc::lquadModel() {
             cout << modelConstraint.getVar(1).get(GRB_StringAttr_VarName) << endl;
             */
 
-            mpc::model.addConstr(modelConstraint == 0);
+
 
         }
 
@@ -309,25 +337,27 @@ void mpc::kineticModel() {
         {0, 1, 0},
         {0, 0, 1} };
 
-    GRBLinExpr modelConstraint = 0;
+    if (mpc::n_st != 6 or mpc::n_con != 3){
+        std::cout << "The number of states is not 6, or the number of controls is not 3" << endl;
+    }
+
+    GRBLinExpr dx = 0;
     // x_t+1 = A*x_t + B*u_t ???
-    for (int i = 0; i < N - 1; i++) {
-        for (int n = 0; n < mpc::n_st; n++) {
-            modelConstraint = 0;
+    for (int n = 0; n < N - 1; n++) {
+        for (int i = 0; i < mpc::n_st; i++) {
+            dx = 0;
             for (int j = 0; j < mpc::n_st; j++) {
-                if (A[n][j] != 0)
-                    modelConstraint += A[n][j] * mpc::x[i * n_st + j];
+                if (A[i][j] != 0)
+                    dx += A[i][j] * mpc::x[n * n_st + j];
             }
             for (int k = 0; k < mpc::n_con; k++) {
-                if (B[n][k] != 0)
-                    modelConstraint += B[n][k] * mpc::u[i * n_con + k];
+                if (B[i][k] != 0)
+                    dx += B[i][k] * mpc::u[n * n_con + k];
             }
             // Make sure of this 
-            // (A*x_t + B*u_t) * dt + x_t - x_t+1 == 0
-            modelConstraint = modelConstraint * mpc::dt + mpc::x[i * n_st + n] - mpc::x[(i + 1) * n_st + n];
-
-
-            mpc::model.addConstr(modelConstraint == 0);
+            // x_t+1 = x_t + (A*x_t + B*u_t) * dt
+            //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
+            mpc::model.addConstr(mpc::x[n * n_st + i] + dx * mpc::dt - mpc::x[(n + 1) * n_st + i]  == 0);
 
         }
 
@@ -390,6 +420,9 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
 
     model.setObjective(obj);
 
+    // Adding the collision constraints to the optimization problem
+    collision(opponent);
+
     // Optimize
     //model.update();
     model.optimize();
@@ -402,33 +435,14 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
     }
 */
 
-    /*
-    double beta[3];
-    double mag = 1;
 
-    // Setting up the objective
-    for (int i = 0; i < N; i++){
-        beta[0] = (opponent->p[i * 3 + 0] - p[i * 3 + 0]);
-        beta[1] = (opponent->p[i * 3 + 1] - p[i * 3 + 1]);
-        beta[2] = (opponent->p[i * 3 + 2] - p[i * 3 + 2]);
-        mag = beta[0] * beta[0] + beta[1] * beta[1] + beta[2] * beta[2];
-        obj += opponent->mu[i] * ((beta[0] * x[i * n_st + 0]) + (beta[1] * x[i * n_st + 1]) + (beta[2] * x[i * n_st + 2])) / mag;
-    }
-    obj *= alpha;
 
-    // TODO: Make sure of this, maybe modify it
-    double tTpN = (t[0] * p[3 * N + 0] + t[1] * p[3 * N + 1] + t[2] * p[3 * N + 2]);
-    double pN_tTn = ((p[3 * N + 0] - t[0]) * n[0] + (p[3 * N + 1] - t[1]) * n[1] + (p[3 * N + 2] - t[2]) * n[2]);
-    obj += tTpN / (1 - k * pN_tTn);
+}
 
-    model.setObjective(obj);
-
-    // Adding the collision constraints to the optimization problem
-    collision(opponent);
-
-    // Optimize
-    //model.update();
-    model.optimize();
+double* mpc::getTraj() {
+    // Input a list of pose messages as a pointer
+    // Fill up using p from the class
+    // Return it?
 
     // Save ego trajectory in p
     for (int i = 0; i < N; i++) {
@@ -436,17 +450,6 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
         p[3 * i + 1] = x[n_st * i + 1].get(GRB_DoubleAttr_X);
         p[3 * i + 2] = x[n_st * i + 2].get(GRB_DoubleAttr_X);
     }
-    // Save mu vector
-    for (int i = 0; i < N; i++) {
-        mu[i] = colli_con[i].get(GRB_DoubleAttr_Slack);
-    }
-    */
-}
-
-double* mpc::getTraj() {
-    // Input a list of pose messages as a pointer
-    // Fill up using p from the class
-    // Return it?
     return 0;
 }
 
