@@ -19,10 +19,6 @@ using namespace std;
 
 #define f 10.0
 
-
-static double fx(double u) { return exp(u); }
-static double g(double u) { return sqrt(u); }
-
 class mpc {       // Iterative Best Response
 public: // Access specifier
     mpc(ros::NodeHandle* node){
@@ -73,6 +69,27 @@ public: // Access specifier
         //nlquadModel();
         lquadModel();
         //kineticModel();
+
+        // Pre-computing part of the objective
+        double R[n_con][n_con] = 
+        {{1, 0, 0, 0},
+        {0, 1, 0, 0},
+        {0, 0, 1, 0},
+        {0, 0, 0, 1}};
+        int cols = 4;
+
+        // Constructing the objective
+        // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
+        for (int n = 0; n < N; n++){ // For each time step
+            // Quad part (in the form of uT*R*u), 4 for u inputs
+            for (int i = 0; i < n_con; i++){ 
+                for (int j = 0; j < n_con; j++){
+                    if (R[i][j] != 0){
+                        contObj += R[i][j]*x[n * n_st + i]*x[n * n_st + j];
+                    }
+                }
+            }
+        }
         
         /*
         // Initilizing to 0's for the first iteration
@@ -99,17 +116,17 @@ private:
 
     // Class attributes
     double dt = 1/f;
-    int64_t n_st = 12;
-    int64_t n_con = 4;
+    const int64_t n_st = 12;
+    const int64_t n_con = 4;
     GRBEnv* env = new GRBEnv();
     GRBModel model = GRBModel(*env);
 
     GRBVar* x;
     GRBVar* u;
 
+
     GRBQuadExpr obj = 0;
-    double beta[3];
-    double mag = 1;
+    GRBQuadExpr contObj = 0;
     /* Add variables to the model */
     double* xlb = new double[N * n_st]{ -GRB_INFINITY };
     double* xub = new double[N * n_st]{ GRB_INFINITY };
@@ -420,8 +437,28 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
             }
         }
     }
+    obj += contObj;
 
     model.setObjective(obj);
+
+    // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
+    double x0[n_st] = {
+        path->poses[N].pose.position.x,
+        path->poses[N].pose.position.y,
+        path->poses[N].pose.position.z,
+        path->poses[N].pose.orientation.x,
+        path->poses[N].pose.orientation.y,
+        path->poses[N].pose.orientation.z,
+        path->poses[N+1].pose.position.x,
+        path->poses[N+1].pose.position.y,
+        path->poses[N+1].pose.position.z,
+        path->poses[N+1].pose.orientation.x,
+        path->poses[N+1].pose.orientation.y,
+        path->poses[N+1].pose.orientation.z
+    };
+    for(int i = 0; i < n_st; i++){
+        mpc::model.addConstr(x[i] - x0[i]  == 0);
+    }
 
     // Adding the collision constraints to the optimization problem
     //collision(opponent);
