@@ -6,9 +6,8 @@
 #include "ros/ros.h"
 #include "gurobi_c++.h"
 
-#include "std_msgs/String.h"
-#include "std_msgs/Bool.h"
 #include "nav_msgs/Path.h"
+#include "geometry_msgs/PoseArray.h"
 
 #include <iostream>
 #include <sstream>
@@ -30,7 +29,9 @@ public: // Access specifier
 
       
         sub = node->subscribe("gtp", 10, &mpc::mpcCallback, this);
-        pub = node->advertise<std_msgs::String>("gtp_path", 2);
+        pub = node->advertise<geometry_msgs::Quaternion>("control", 2);
+        pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
+
         // Adding the optimization variables
         
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
@@ -91,7 +92,8 @@ public: // Access specifier
     void lquadModel(); // Linear model
     void collision(mpc* opponent); // Initializing collision constraints
     void mpcSetup(const nav_msgs::Path::ConstPtr& path);
-    double* getTraj();
+    void pubTraj();
+    void pubCont();
 
 private:
 
@@ -127,6 +129,7 @@ private:
 
     //ros::NodeHandle* n;
     ros::Publisher pub;
+    ros::Publisher pubTrajectory;
     ros::Subscriber sub;
 
     nav_msgs::Path path;
@@ -421,7 +424,7 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
     model.setObjective(obj);
 
     // Adding the collision constraints to the optimization problem
-    collision(opponent);
+    //collision(opponent);
 
     // Optimize
     //model.update();
@@ -439,18 +442,47 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
 
 }
 
-double* mpc::getTraj() {
+void mpc::pubCont() {
+    // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
+
+    geometry_msgs::Quaternion cont;
+
+    cont.x = u[0].get(GRB_DoubleAttr_X);
+    cont.y = u[1].get(GRB_DoubleAttr_X);
+    cont.z = u[2].get(GRB_DoubleAttr_X);
+    cont.w = u[3].get(GRB_DoubleAttr_X);
+
+    //ROS_INFO("%s", toSend.data.c_str());
+    pub.publish(cont);
+
+    ros::spinOnce();
+
+}
+
+void mpc::pubTraj() {
     // Input a list of pose messages as a pointer
-    // Fill up using p from the class
-    // Return it?
+    geometry_msgs::PoseArray p;
+    geometry_msgs::Pose pos;
 
     // Save ego trajectory in p
     for (int i = 0; i < N; i++) {
-        p[3 * i + 0] = x[n_st * i + 0].get(GRB_DoubleAttr_X);
-        p[3 * i + 1] = x[n_st * i + 1].get(GRB_DoubleAttr_X);
-        p[3 * i + 2] = x[n_st * i + 2].get(GRB_DoubleAttr_X);
+        pos.position.x = x[n_st * i + 0].get(GRB_DoubleAttr_X);
+        pos.position.y = x[n_st * i + 1].get(GRB_DoubleAttr_X);
+        pos.position.z = x[n_st * i + 2].get(GRB_DoubleAttr_X);
+
+        // Maybe add later, remember orientation is in quaternion, and coordinates used here are RPY
+        /*
+        pos.orientation.x = x[n_st * i + 0].get(GRB_DoubleAttr_X);
+        pos.orientation.y = x[n_st * i + 1].get(GRB_DoubleAttr_X);
+        pos.orientation.z = x[n_st * i + 2].get(GRB_DoubleAttr_X);
+        */
+
+        p.poses.push_back(pos);
     }
-    return 0;
+    pubTrajectory.publish(p);
+
+    ros::spinOnce();
+
 }
 
 void mpc::mpcCallback(const nav_msgs::Path::ConstPtr& msg){
@@ -459,20 +491,9 @@ void mpc::mpcCallback(const nav_msgs::Path::ConstPtr& msg){
     //collision(); // Adding collision constraints
 
     mpcSetup(msg);
-    double* tra = getTraj();
+    pubCont();
+    pubTraj();
 
-    //ROS_INFO("I heard: [%s]", msg->data.c_str());
-    std_msgs::String toSend;
-
-    //std::stringstream ss;
-    //ss << "hello world ";
-    toSend.data = std::string("Helo world");
-
-    //ROS_INFO("%s", toSend.data.c_str());
-    pub.publish(toSend);
-
-    ros::spinOnce();
-  
 }
 
 int main(int argc, char* argv[]){
