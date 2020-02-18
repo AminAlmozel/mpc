@@ -22,7 +22,6 @@ using namespace std;
 class mpc {       // Iterative Best Response
 public: // Access specifier
     mpc(ros::NodeHandle* node){
-
       
         sub = node->subscribe("gtp", 10, &mpc::mpcCallback, this);
         pub = node->advertise<geometry_msgs::Quaternion>("control", 2);
@@ -100,15 +99,16 @@ public: // Access specifier
             mu[i] = 0;
         }
         */
+        ROS_WARN_STREAM("Initialized MPC node");
     }
 
     // Class methods
-    void mpcCallback(const nav_msgs::Path::ConstPtr& msg);
+    void mpcCallback(const geometry_msgs::PoseArray::ConstPtr& msg);
     void kineticModel(); // Simple acceleration model
     void nlquadModel(); // Nonlinear model
     void lquadModel(); // Linear model
     void collision(mpc* opponent); // Initializing collision constraints
-    void mpcSetup(const nav_msgs::Path::ConstPtr& path);
+    void mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path);
     void pubTraj();
     void pubCont();
 
@@ -149,7 +149,7 @@ private:
     ros::Publisher pubTrajectory;
     ros::Subscriber sub;
 
-    nav_msgs::Path path;
+    geometry_msgs::PoseArray path;
 
 };
 
@@ -411,7 +411,7 @@ void mpc::collision(mpc* opponent) {
 }
 
 
-void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
+void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     GRBQuadExpr obj = 0;
     GRBLinExpr temp[3] = {0, 0, 0};
 
@@ -424,9 +424,9 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
     // Constructing the objective
     // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
     for (int n = 0; n < N; n++){ // For each time step
-        temp[0] = x[n * n_st + 0] - path->poses[n].pose.position.x;
-        temp[1] = x[n * n_st + 1] - path->poses[n].pose.position.y;
-        temp[2] = x[n * n_st + 2] - path->poses[n].pose.position.z;
+        temp[0] = x[n * n_st + 0] - path->poses[n].position.x;
+        temp[1] = x[n * n_st + 1] - path->poses[n].position.y;
+        temp[2] = x[n * n_st + 2] - path->poses[n].position.z;
         // Quad part (in the form of xT*Q*x), 3 for x, y, z states
         // Add this if nessecary mtimes([con.T, R, con])
         for (int i = 0; i < 3; i++){ 
@@ -443,18 +443,18 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
 
     // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
     double x0[n_st] = {
-        path->poses[N].pose.position.x,
-        path->poses[N].pose.position.y,
-        path->poses[N].pose.position.z,
-        path->poses[N].pose.orientation.x,
-        path->poses[N].pose.orientation.y,
-        path->poses[N].pose.orientation.z,
-        path->poses[N+1].pose.position.x,
-        path->poses[N+1].pose.position.y,
-        path->poses[N+1].pose.position.z,
-        path->poses[N+1].pose.orientation.x,
-        path->poses[N+1].pose.orientation.y,
-        path->poses[N+1].pose.orientation.z
+        path->poses[N].position.x,
+        path->poses[N].position.y,
+        path->poses[N].position.z,
+        path->poses[N].orientation.x,
+        path->poses[N].orientation.y,
+        path->poses[N].orientation.z,
+        path->poses[N+1].position.x,
+        path->poses[N+1].position.y,
+        path->poses[N+1].position.z,
+        path->poses[N+1].orientation.x,
+        path->poses[N+1].orientation.y,
+        path->poses[N+1].orientation.z
     };
     for(int i = 0; i < n_st; i++){
         mpc::model.addConstr(x[i] - x0[i]  == 0);
@@ -481,7 +481,7 @@ void mpc::mpcSetup(const nav_msgs::Path::ConstPtr& path){
 
 void mpc::pubCont() {
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
-
+    // Maybe use odometry instead
     geometry_msgs::Quaternion cont;
 
     cont.x = u[0].get(GRB_DoubleAttr_X);
@@ -522,7 +522,8 @@ void mpc::pubTraj() {
 
 }
 
-void mpc::mpcCallback(const nav_msgs::Path::ConstPtr& msg){
+void mpc::mpcCallback(const geometry_msgs::PoseArray::ConstPtr& msg){
+    ROS_WARN_STREAM("Recieved Pose Array!");
 
     // TODO: Add collision constraints
     //collision(); // Adding collision constraints
