@@ -23,7 +23,7 @@ class mpc {       // Iterative Best Response
 public: // Access specifier
     mpc(ros::NodeHandle* node){
         
-        sub = node->subscribe("gtp", 10, &mpc::mpcCallback, this);
+        sub = node->subscribe("gtp", 1, &mpc::mpcCallback, this);
         pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
         pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
 
@@ -48,20 +48,20 @@ public: // Access specifier
         for (int i = 0; i < n_con * N; i++) {
             utype[i] = GRB_CONTINUOUS;
             if (i % n_con == 1) {
-                ulb[i] = 0;
-                uub[i] = 1;
+                ulb[i] = -GRB_INFINITY;
+                uub[i] = GRB_INFINITY;
             }
             if (i % n_con == 2) {
-                ulb[i] = 0;
-                uub[i] = 1;
+                ulb[i] = -GRB_INFINITY;
+                uub[i] = GRB_INFINITY;
             }
             if (i % n_con == 3) {
-                ulb[i] = 0;
-                uub[i] = 1;
+                ulb[i] = -GRB_INFINITY;
+                uub[i] = GRB_INFINITY;
             }
             if (i % n_con == 0) {
-                ulb[i] = 0;
-                uub[i] = 1;
+                ulb[i] = -GRB_INFINITY;
+                uub[i] = GRB_INFINITY;
             }
 
         }
@@ -495,8 +495,9 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         path->poses[N+1].orientation.y,
         path->poses[N+1].orientation.z
     };
+
     for(int i = 0; i < n_st; i++){
-        mpc::model.addConstr(x[i] - x0[i]  == 0);
+        mpc::model.addConstr(x[i] == x0[i]);
     }
 
     // Adding the collision constraints to the optimization problem
@@ -504,6 +505,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
     // Optimize
     model.update();
+    //model.reset(0);
     model.optimize();
 }
 
@@ -511,11 +513,14 @@ void mpc::pubCont() {
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
     // Maybe use odometry instead
     geometry_msgs::Quaternion cont;
+    double u_nominal = 0;
 
     cont.x = u[0].get(GRB_DoubleAttr_X);
     cont.y = u[1].get(GRB_DoubleAttr_X);
     cont.z = u[2].get(GRB_DoubleAttr_X);
     cont.w = u[3].get(GRB_DoubleAttr_X);
+
+    cont.x += u_nominal;
 
     //ROS_INFO("%s", toSend.data.c_str());
     pubControl.publish(cont);
