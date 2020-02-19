@@ -22,12 +22,12 @@ using namespace std;
 class mpc {       // Iterative Best Response
 public: // Access specifier
     mpc(ros::NodeHandle* node){
-      
+        
         sub = node->subscribe("gtp", 10, &mpc::mpcCallback, this);
-        pub = node->advertise<geometry_msgs::Quaternion>("control", 2);
+        pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
         pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
 
-        // Adding the optimization variables
+
         
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
 
@@ -35,6 +35,12 @@ public: // Access specifier
             xtype[i] = GRB_CONTINUOUS;
             xlb[i] = -GRB_INFINITY;
             xub[i] = GRB_INFINITY;
+        }
+
+        for (int i = 0; i < 3 * N; i++) {
+            ptype[i] = GRB_CONTINUOUS;
+            plb[i] = -GRB_INFINITY;
+            pub[i] = GRB_INFINITY;
         }
 
 
@@ -63,19 +69,26 @@ public: // Access specifier
         // Adding the variables, and setting constraints on the variables
         x = model.addVars(xlb, xub, NULL, xtype, NULL, (int)n_st * N);
         u = model.addVars(ulb, uub, NULL, utype, NULL, (int)n_con * N);
+        p = model.addVars(plb, pub, NULL, ptype, NULL, (int)3 * N);
 
         // Adding the model constraints
-        //nlquadModel();
-        lquadModel();
         //kineticModel();
+        lquadModel();
+        //nlquadModel();
 
-        // Pre-computing part of the objective
+
+        // Computing the objective, in terms of the parameter p
+        double Q[3][3] = 
+        {{1, 0, 0},
+        {0, 1, 0},
+        {0, 0, 1}};
         double R[n_con][n_con] = 
         {{1, 0, 0, 0},
         {0, 1, 0, 0},
         {0, 0, 1, 0},
         {0, 0, 0, 1}};
-        int cols = 4;
+
+        obj = 0;
 
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
@@ -84,11 +97,42 @@ public: // Access specifier
             for (int i = 0; i < n_con; i++){ 
                 for (int j = 0; j < n_con; j++){
                     if (R[i][j] != 0){
-                        contObj += R[i][j]*x[n * n_st + i]*x[n * n_st + j];
+                        obj += R[i][j]*x[n * n_st + i]*x[n * n_st + j];
                     }
                 }
             }
         }
+
+        GRBLinExpr temp[3] = {0, 0, 0};
+
+        // Constructing the objective
+        // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
+        for (int n = 0; n < N; n++){ // For each time step
+            temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
+            temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
+            temp[2] = x[n * n_st + 2] - p[n * 3 + 2];
+            // Quad part (in the form of xT*Q*x), 3 for x, y, z states
+            // Add this if nessecary mtimes([con.T, R, con])
+            for (int i = 0; i < 3; i++){ 
+                for (int j = 0; j < 3; j++){
+                    if (Q[i][j] != 0){
+                        obj += Q[i][j]*temp[i]*temp[j];
+                    }
+                }
+            }
+        }
+
+        model.setObjective(obj);
+        pHandle = new GRBConstr[3 * N];
+        
+        for(int i = 0; i < 3 * N; i++){
+            pHandle[i] = model.addConstr(p[i] == 0);
+        }
+        
+        //pHandle = model.addConstrs(p == 0);
+        
+        
+        parameters = new double[3 * N];
         
         /*
         // Initilizing to 0's for the first iteration
@@ -99,7 +143,7 @@ public: // Access specifier
             mu[i] = 0;
         }
         */
-        ROS_WARN_STREAM("Initialized MPC node");
+        ROS_INFO_STREAM("Initialized MPC node");
     }
 
     // Class methods
@@ -123,10 +167,10 @@ private:
 
     GRBVar* x;
     GRBVar* u;
+    GRBVar* p;
+    GRBConstr* pHandle;
 
-
-    GRBQuadExpr obj = 0;
-    GRBQuadExpr contObj = 0;
+    GRBQuadExpr obj;
     /* Add variables to the model */
     double* xlb = new double[N * n_st]{ -GRB_INFINITY };
     double* xub = new double[N * n_st]{ GRB_INFINITY };
@@ -136,6 +180,10 @@ private:
     double* uub = new double[N * n_con]{ 1 };
     char* utype = new char[N * n_con]{ GRB_CONTINUOUS };
 
+    double* plb = new double[N * 3]{ -GRB_INFINITY };
+    double* pub = new double[N * 3]{ GRB_INFINITY };
+    char* ptype = new char[N * 3]{ GRB_CONTINUOUS };
+
     // Array to store the constraints to remove them quickly
     GRBQConstr* colli_con = new GRBQConstr[N];
 
@@ -143,9 +191,10 @@ private:
     double lub = 1000; // Change to the track length if possible, otherwise +inf
 
     bool firstIteration = 1;
+    double* parameters;
 
     //ros::NodeHandle* n;
-    ros::Publisher pub;
+    ros::Publisher pubControl;
     ros::Publisher pubTrajectory;
     ros::Subscriber sub;
 
@@ -277,12 +326,12 @@ void mpc::lquadModel() {
     double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
     double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
 
-    double A[12][12] = { // Missing 2 g's somewhere
+    double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
         {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
         {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
         {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, g, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, -g, 0, 0, 0, 0, 0 },
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 },
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
@@ -318,7 +367,6 @@ void mpc::lquadModel() {
                 if (B[i][k] != 0)
                     dx += B[i][k] * mpc::u[n * n_con + k];
             }
-            // Make sure of this 
             // x_t+1 = x_t + (A*x_t + B*u_t) * dt
             //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
             mpc::model.addConstr(mpc::x[n * n_st + i] + dx * mpc::dt - mpc::x[(n + 1) * n_st + i]  == 0);
@@ -412,34 +460,25 @@ void mpc::collision(mpc* opponent) {
 
 
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
-    GRBQuadExpr obj = 0;
-    GRBLinExpr temp[3] = {0, 0, 0};
-
-    double Q[3][3] = 
-    {{1, 0, 0},
-    {0, 1, 0},
-    {0, 0, 1}};
-    int cols = 3;
-
-    // Constructing the objective
-    // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
-    for (int n = 0; n < N; n++){ // For each time step
+    /*
         temp[0] = x[n * n_st + 0] - path->poses[n].position.x;
         temp[1] = x[n * n_st + 1] - path->poses[n].position.y;
         temp[2] = x[n * n_st + 2] - path->poses[n].position.z;
-        // Quad part (in the form of xT*Q*x), 3 for x, y, z states
-        // Add this if nessecary mtimes([con.T, R, con])
-        for (int i = 0; i < 3; i++){ 
-            for (int j = 0; j < 3; j++){
-                if (Q[i][j] != 0){
-                    obj += Q[i][j]*temp[i]*temp[j];
-                }
-            }
-        }
-    }
-    obj += contObj;
+        */
 
-    model.setObjective(obj);
+    for (int n = 0; n < N; n++){
+        //parameters[n * 3 + 0];
+
+        parameters[n * 3 + 0] = path->poses[n].position.x;
+        parameters[n * 3 + 1] = path->poses[n].position.y;
+        parameters[n * 3 + 2] = path->poses[n].position.z;
+
+    }
+
+    for(int i = 0; i < 3 * N; i++){
+        pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
+    }
+    //pHandle->set(GRB_DoubleAttr_RHS, parameters);
 
     // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
     double x0[n_st] = {
@@ -464,19 +503,8 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     //collision(opponent);
 
     // Optimize
-    //model.update();
+    model.update();
     model.optimize();
-/*
-    // Save ego trajectory in p
-    for (int i = 0; i < N; i++) {
-        p[3 * i + 0] = x[n_st * i + 0].get(GRB_DoubleAttr_X);
-        p[3 * i + 1] = x[n_st * i + 1].get(GRB_DoubleAttr_X);
-        p[3 * i + 2] = x[n_st * i + 2].get(GRB_DoubleAttr_X);
-    }
-*/
-
-
-
 }
 
 void mpc::pubCont() {
@@ -490,7 +518,7 @@ void mpc::pubCont() {
     cont.w = u[3].get(GRB_DoubleAttr_X);
 
     //ROS_INFO("%s", toSend.data.c_str());
-    pub.publish(cont);
+    pubControl.publish(cont);
 
     ros::spinOnce();
 
@@ -523,7 +551,7 @@ void mpc::pubTraj() {
 }
 
 void mpc::mpcCallback(const geometry_msgs::PoseArray::ConstPtr& msg){
-    ROS_WARN_STREAM("Recieved Pose Array!");
+    ROS_INFO_STREAM("Recieved Pose Array!");
 
     // TODO: Add collision constraints
     //collision(); // Adding collision constraints
