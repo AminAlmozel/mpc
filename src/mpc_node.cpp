@@ -547,59 +547,5 @@ int main(int argc, char* argv[]){
 
     ros::spin();
 
-    // Get the trajectory from the polynomial trajectory generator
-
-    // Get the t, n, and k values from PTG
-
-    // Give it to the gtp
-
-    /*
-    double* t = 0;
-    double* n = 0;
-    double k = 0;
-
-    opponent.gtp(&ego, alpha, &t[0], &n[0], k);
-    for (int i = 0; i < L; i++) {
-        
-        ego.gtp(&opponent, alpha, &t[0], &n[0], k);
-        opponent.gtp(&ego, alpha, &t[0], &n[0], k);
-    }
-    ego.gtp(&opponent, alpha, &t[0], &n[0], k);
-    ego.getTraj();
-
-    // Send it using a pose message to the MPC node
-    */
-
     return 0;
 }
-
-/*
-    GRBConstr c0 = model.getConstrs()[0];
-    //model.remove(c0);
-    //model.addConstr(vars[0] + vars[1] == 1);
-    c0.set(GRB_DoubleAttr_RHS, 2);
-
-        vars[0].set(GRB_DoubleAttr_Start, 0.5);
-    vars[1].set(GRB_DoubleAttr_Start, 0.5);
-    vars[2].set(GRB_DoubleAttr_Start, 0);
-    model.setObjective(obj);
-    model.update();
-
-    model.optimize();
-    if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
-        *objvalP = model.get(GRB_DoubleAttr_ObjVal);
-        for (i = 0; i < cols; i++)
-            solution[i] = vars[i].get(GRB_DoubleAttr_X);
-        success = true;
-    }
-    cout << "x: " << solution[0] << " y: " << solution[1] << " z: " << solution[2] << endl;
-
-
-        // Add piecewise constraints
-    for (int j = 0; j < n; j++) {
-        model.addGenConstrPWL(x[j], y[j], npts, xpts, ypts);
-    }
-
-
-
-*/
