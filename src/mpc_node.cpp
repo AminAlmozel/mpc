@@ -91,13 +91,13 @@ public: // Access specifier
         obj = 0;
 
         // Constructing the objective
-        // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
+        // uT*R*u
         for (int n = 0; n < N; n++){ // For each time step
             // Quad part (in the form of uT*R*u), 4 for u inputs
             for (int i = 0; i < n_con; i++){ 
                 for (int j = 0; j < n_con; j++){
                     if (R[i][j] != 0){
-                        obj += R[i][j]*x[n * n_st + i]*x[n * n_st + j];
+                        obj += R[i][j]*u[n * n_con + i]*u[n * n_con + j];
                     }
                 }
             }
@@ -460,19 +460,11 @@ void mpc::collision(mpc* opponent) {
 
 
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
-    /*
-        temp[0] = x[n * n_st + 0] - path->poses[n].position.x;
-        temp[1] = x[n * n_st + 1] - path->poses[n].position.y;
-        temp[2] = x[n * n_st + 2] - path->poses[n].position.z;
-        */
-
+    // Getting the parameters (reference path) from the received message, and using them as equality constraints
     for (int n = 0; n < N; n++){
-        //parameters[n * 3 + 0];
-
         parameters[n * 3 + 0] = path->poses[n].position.x;
         parameters[n * 3 + 1] = path->poses[n].position.y;
         parameters[n * 3 + 2] = path->poses[n].position.z;
-
     }
 
     for(int i = 0; i < 3 * N; i++){
@@ -511,10 +503,10 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
 void mpc::pubCont() {
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
-    // Maybe use odometry instead
     geometry_msgs::Quaternion cont;
     double u_nominal = 0;
 
+    // Getting the control input from the solution of the optimization problem
     cont.x = u[0].get(GRB_DoubleAttr_X);
     cont.y = u[1].get(GRB_DoubleAttr_X);
     cont.z = u[2].get(GRB_DoubleAttr_X);
@@ -522,11 +514,9 @@ void mpc::pubCont() {
 
     cont.x += u_nominal;
 
-    //ROS_INFO("%s", toSend.data.c_str());
     pubControl.publish(cont);
 
     ros::spinOnce();
-
 }
 
 void mpc::pubTraj() {
