@@ -30,11 +30,70 @@ public: // Access specifier
 
         
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
-
+        double rpAngle = 180 * 3.14 / 180; // 30 degress
+        double yAngle = 180 * 3.14 / 180; // 30 degress
         for (int i = 0; i < n_st * N; i++) {
             xtype[i] = GRB_CONTINUOUS;
-            xlb[i] = -GRB_INFINITY;
-            xub[i] = GRB_INFINITY;
+            // x
+            if (i % n_st == 1) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // y
+            if (i % n_st == 2) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // z
+            if (i % n_st == 3) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // x dot
+            if (i % n_st == 4) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // y dot
+            if (i % n_st == 5) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // z dot
+            if (i % n_st == 6) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // Roll, phi
+            if (i % n_st == 7) {
+                xlb[i] = -rpAngle;
+                xub[i] = rpAngle;
+            }
+            // Pitch, theta
+            if (i % n_st == 8) {
+                xlb[i] = -rpAngle;
+                xub[i] = rpAngle;
+            }
+            // Yaw, psi
+            if (i % n_st == 9) {
+                xlb[i] = -yAngle;
+                xub[i] = yAngle;
+            }
+            // Roll dot, phi
+            if (i % n_st == 10) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // Pitch dot, theta
+            if (i % n_st == 11) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
+            // Yaw dot, psi
+            if (i % n_st == 0) {
+                xlb[i] = -GRB_INFINITY;
+                xub[i] = GRB_INFINITY;
+            }
         }
 
         for (int i = 0; i < 3 * N; i++) {
@@ -43,25 +102,27 @@ public: // Access specifier
             pub[i] = GRB_INFINITY;
         }
 
-
+        u_bar = 0;
+        double rpb = 2.90; // Roll rate, pitch rate bound
+        double yb = 3.793; // Yaw bound, through experimentation
         // TODO: give proper values for the boundaries
         for (int i = 0; i < n_con * N; i++) {
             utype[i] = GRB_CONTINUOUS;
             if (i % n_con == 1) {
-                ulb[i] = -GRB_INFINITY;
-                uub[i] = GRB_INFINITY;
+                ulb[i] = 0 - u_bar;
+                uub[i] = 1 - u_bar;
             }
             if (i % n_con == 2) {
-                ulb[i] = -GRB_INFINITY;
-                uub[i] = GRB_INFINITY;
+                ulb[i] = -rpb;
+                uub[i] = rpb;
             }
             if (i % n_con == 3) {
-                ulb[i] = -GRB_INFINITY;
-                uub[i] = GRB_INFINITY;
+                ulb[i] = -rpb;
+                uub[i] = rpb;
             }
             if (i % n_con == 0) {
-                ulb[i] = -GRB_INFINITY;
-                uub[i] = GRB_INFINITY;
+                ulb[i] = -yb;
+                uub[i] = yb;
             }
 
         }
@@ -107,7 +168,7 @@ public: // Access specifier
 
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
-        for (int n = 0; n < N; n++){ // For each time step
+        for (int n = 1; n < N; n++){ // For each time step
             temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
             temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
             temp[2] = x[n * n_st + 2] - p[n * 3 + 2];
@@ -186,9 +247,9 @@ private:
 
     // Array to store the constraints to remove them quickly
     GRBQConstr* colli_con = new GRBQConstr[N];
+    GRBConstr* initial_st = new GRBConstr[n_st];
 
-    double llb = 0;
-    double lub = 1000; // Change to the track length if possible, otherwise +inf
+    double u_bar;
 
     bool firstIteration = 1;
     double* parameters;
@@ -311,6 +372,12 @@ void mpc::nlquadModel() {
 
 
 void mpc::lquadModel() {
+    // Since it's a linear model, try to keep the yaw around 0
+    GRBQuadExpr yaw = 0;
+    for (int n = 0; n < N; n++){
+        yaw += x[n * n_st + 6] * x[n * n_st + 6];
+    }
+    model.setObjective(model.getObjective() + yaw);
 
     // Constants
     double g = 9.81;
@@ -356,7 +423,7 @@ void mpc::lquadModel() {
 
     GRBLinExpr dx = 0;
     // x_t+1 = A*x_t + B*u_t ???
-    for (int n = 0; n < N - 1; n++) {
+    for (int n = 1; n < N - 1; n++) {
         for (int i = 0; i < mpc::n_st; i++) {
             dx = 0;
             for (int j = 0; j < mpc::n_st; j++) {
@@ -369,6 +436,7 @@ void mpc::lquadModel() {
             }
             // x_t+1 = x_t + (A*x_t + B*u_t) * dt
             //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
+
             mpc::model.addConstr(mpc::x[n * n_st + i] + dx * mpc::dt - mpc::x[(n + 1) * n_st + i]  == 0);
 
             /*
@@ -462,9 +530,11 @@ void mpc::collision(mpc* opponent) {
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     // Getting the parameters (reference path) from the received message, and using them as equality constraints
     for (int n = 0; n < N; n++){
+
         parameters[n * 3 + 0] = path->poses[n].position.x;
         parameters[n * 3 + 1] = path->poses[n].position.y;
         parameters[n * 3 + 2] = path->poses[n].position.z;
+
     }
 
     for(int i = 0; i < 3 * N; i++){
@@ -480,16 +550,93 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         path->poses[N].orientation.x,
         path->poses[N].orientation.y,
         path->poses[N].orientation.z,
-        path->poses[N+1].position.x,
-        path->poses[N+1].position.y,
-        path->poses[N+1].position.z,
+        remainder(path->poses[N+1].position.x, 2 * M_PI),
+        remainder(path->poses[N+1].position.y, 2 * M_PI),
+        remainder(path->poses[N+1].position.z, 2 * M_PI),
         path->poses[N+1].orientation.x,
         path->poses[N+1].orientation.y,
         path->poses[N+1].orientation.z
     };
-
     for(int i = 0; i < n_st; i++){
-        mpc::model.addConstr(x[i] == x0[i]);
+        std::cout << x0[i] << ", ";
+    }
+    std::cout << std::endl;
+    // Removing old initial state constraints
+    if (!firstIteration){
+        for(int i = 0; i < n_st; i++){
+            model.remove(initial_st[i]);
+            
+        }
+    }
+    firstIteration = 0;
+
+    // Constants
+    double g = 9.81;
+    double m = 1; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
+    double l = 0.2275; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
+    //AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
+    //AirLib / include / vehicles / multirotor / MultiRotorParams.hpp
+    // and plugging the two links into matlab
+    double Ix = 0.0066;
+    double Iy = 0.0079;
+    double Iz = 0.0143;
+    double Jr = 6e-5;
+    double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+    double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+    double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
+        {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, g, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, -g, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
+
+    double B[12][4] = {
+        {0, 0, 0, 0},
+        {0, 0, 0, 0},
+        {0, 0, 0, 0},
+        {0, 0, 0, 0},
+        {0, 0, 0, 0},
+        {1/m, 0, 0, 0},
+        {0, 0, 0, 0},
+        {0, 0, 0, 0},
+        {0, 0, 0, 0},
+        {0, l/Ix, 0, 0},
+        {0, 0, l/Iy, 0},
+        {0, 0, 0, l/Iz} };
+    // Adding the new ones
+    GRBLinExpr dx = 0;
+    for (int i = 0; i < mpc::n_st; i++) {
+        int n = 0;
+        dx = 0;
+        for (int j = 0; j < mpc::n_st; j++) {
+            if (A[i][j] != 0)
+                dx += A[i][j] * x0[j];
+        }
+        for (int k = 0; k < mpc::n_con; k++) {
+            if (B[i][k] != 0)
+                dx += B[i][k] * mpc::u[k];
+        }
+
+
+        // x_t+1 = x_t + (A*x_t + B*u_t) * dt
+        //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
+        initial_st[i] = mpc::model.addConstr(x0[i] + dx * mpc::dt - mpc::x[(n + 1) * n_st + i]  == 0);
+
+        /*
+        printf("%f *", modelConstraint.getCoeff(0));
+        cout << modelConstraint.getVar(0).get(GRB_StringAttr_VarName) << endl;
+        printf("%f *", modelConstraint.getCoeff(1));
+        cout << modelConstraint.getVar(1).get(GRB_StringAttr_VarName) << endl;
+        */
+        //mpc::model.addConstr(x[i] == x0[i]);
+
     }
 
     // Adding the collision constraints to the optimization problem
@@ -499,12 +646,12 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     model.update();
     //model.reset(0);
     model.optimize();
+
 }
 
 void mpc::pubCont() {
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
     geometry_msgs::Quaternion cont;
-    double u_nominal = 0;
 
     // Getting the control input from the solution of the optimization problem
     cont.x = u[0].get(GRB_DoubleAttr_X);
@@ -512,7 +659,7 @@ void mpc::pubCont() {
     cont.z = u[2].get(GRB_DoubleAttr_X);
     cont.w = u[3].get(GRB_DoubleAttr_X);
 
-    cont.x += u_nominal;
+    cont.x += u_bar;
 
     pubControl.publish(cont);
 
