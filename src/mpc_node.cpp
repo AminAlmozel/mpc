@@ -30,8 +30,8 @@ public: // Access specifier
 
         
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
-        double rpAngle = 180 * 3.14 / 180; // 30 degress
-        double yAngle = 180 * 3.14 / 180; // 30 degress
+        double rpAngle = 180 * M_PI / 180; // 30 degress
+        double yAngle = 180 * M_PI / 180; // 30 degress
         for (int i = 0; i < n_st * N; i++) {
             xtype[i] = GRB_CONTINUOUS;
             // x
@@ -66,18 +66,18 @@ public: // Access specifier
             }
             // Roll, phi
             if (i % n_st == 7) {
-                xlb[i] = -rpAngle;
-                xub[i] = rpAngle;
+                xlb[i] = -GRB_INFINITY;//rpAngle;
+                xub[i] = GRB_INFINITY;//rpAngle;
             }
             // Pitch, theta
             if (i % n_st == 8) {
-                xlb[i] = -rpAngle;
-                xub[i] = rpAngle;
+                xlb[i] = -GRB_INFINITY;//rpAngle;
+                xub[i] = GRB_INFINITY;//rpAngle;
             }
             // Yaw, psi
             if (i % n_st == 9) {
-                xlb[i] = -yAngle;
-                xub[i] = yAngle;
+                xlb[i] = -GRB_INFINITY;//yAngle;
+                xub[i] = GRB_INFINITY;//yAngle;
             }
             // Roll dot, phi
             if (i % n_st == 10) {
@@ -168,12 +168,11 @@ public: // Access specifier
 
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
-        for (int n = 1; n < N; n++){ // For each time step
+        for (int n = 0; n < N; n++){ // For each time step
             temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
             temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
             temp[2] = x[n * n_st + 2] - p[n * 3 + 2];
             // Quad part (in the form of xT*Q*x), 3 for x, y, z states
-            // Add this if nessecary mtimes([con.T, R, con])
             for (int i = 0; i < 3; i++){ 
                 for (int j = 0; j < 3; j++){
                     if (Q[i][j] != 0){
@@ -370,7 +369,6 @@ void mpc::nlquadModel() {
 
 }
 
-
 void mpc::lquadModel() {
     // Since it's a linear model, try to keep the yaw around 0
     GRBQuadExpr yaw = 0;
@@ -423,7 +421,7 @@ void mpc::lquadModel() {
 
     GRBLinExpr dx = 0;
     // x_t+1 = A*x_t + B*u_t ???
-    for (int n = 1; n < N - 1; n++) {
+    for (int n = 0; n < N - 1; n++) {
         for (int i = 0; i < mpc::n_st; i++) {
             dx = 0;
             for (int j = 0; j < mpc::n_st; j++) {
@@ -500,7 +498,6 @@ void mpc::kineticModel() {
     }
 }
 
-
 void mpc::collision(mpc* opponent) {
 /*
     double d = 0.8;
@@ -525,7 +522,6 @@ void mpc::collision(mpc* opponent) {
     }
 */    
 }
-
 
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     // Getting the parameters (reference path) from the received message, and using them as equality constraints
@@ -565,7 +561,6 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     if (!firstIteration){
         for(int i = 0; i < n_st; i++){
             model.remove(initial_st[i]);
-            
         }
     }
     firstIteration = 0;
@@ -627,7 +622,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
         // x_t+1 = x_t + (A*x_t + B*u_t) * dt
         //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
-        initial_st[i] = mpc::model.addConstr(x0[i] + dx * mpc::dt - mpc::x[(n + 1) * n_st + i]  == 0);
+        initial_st[i] = mpc::model.addConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
 
         /*
         printf("%f *", modelConstraint.getCoeff(0));
@@ -686,6 +681,8 @@ void mpc::pubTraj() {
 
         p.poses.push_back(pos);
     }
+    std::string frame_id = "world";
+    p.header.frame_id = frame_id;
     pubTrajectory.publish(p);
 
     ros::spinOnce();
