@@ -326,7 +326,7 @@ void mpc::nlquadModel() {
     */
 
     for(int n = 0; n < N; n++){
-        /*
+        
         model.addGenConstrSin(x[n * n_st + 6], sx[3 * n + 0]);
         model.addGenConstrSin(x[n * n_st + 7], sx[3 * n + 1]);
         model.addGenConstrSin(x[n * n_st + 8], sx[3 * n + 2]);
@@ -341,7 +341,7 @@ void mpc::nlquadModel() {
         model.addQConstr(c6s7s8[n] - c6s7[n] * sx[3 * n + 2] == 0);
         model.addQConstr(s8c8[n] - sx[3 * n + 2] * cx[3 * n + 2] == 0);
         model.addQConstr(c6c7[n] - cx[3 * n + 0] * cx[3 * n + 1] == 0);
-        */
+        
     }
 
 
@@ -376,19 +376,23 @@ void mpc::nlquadModel() {
         // Yawdd, psi
         xdotQuad[5] = (Ix - Iy) / Iz * x[n * n_st + 9] * x[n * n_st + 10] + cQ * (-u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] - u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / Iz;
 
+        int k = 0;
         // Adding linear constraints
         for(int i = 0; i < 6; i++){
             GRBLinExpr modelConstraint = 0;
+            if (i > 2){ k = 3;} // To match the order of the states and xdot, matching states 0, 1, 2, 6, 7, 8
             // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i] + xdotLin[i] * dt - x[(n + 1) * n_st + i];
+            modelConstraint = x[n * n_st + i + k] + xdotLin[i] * dt - x[(n + 1) * n_st + i + k];
             mpc::model.addConstr(modelConstraint == 0);
         }
 
+        k = 3;
         // Adding quadractic constraints
         for(int i = 0; i < 6; i++){
             GRBQuadExpr modelConstraint = 0;
+            if (i > 2){ k = 6;} // To match the order of the states and xdot, matching states 3, 4, 5, 9, 10, 11
             // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i] + xdotQuad[i] * dt - x[(n + 1) * n_st + i];
+            modelConstraint = x[n * n_st + i + k] + xdotQuad[i] * dt - x[(n + 1) * n_st + i + k];
             mpc::model.addQConstr(modelConstraint == 0);
         }
 
@@ -552,11 +556,11 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         parameters[n * 3 + 2] = 0.3;
 
     }
-    /*
+    
     for(int i = 0; i < 3 * N; i++){
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
     }
-    */
+    
     //pHandle->set(GRB_DoubleAttr_RHS, parameters);
 
     // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
@@ -582,7 +586,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     
     // Removing old initial state constraints
     if (!firstIteration){
-        for(int i = 0; i < 4; i++){
+        for(int i = 0; i < n_st; i++){
             std::cout << std::endl;
             model.remove(initial_st[i]);
         }
@@ -691,12 +695,12 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     //collision(opponent);
     try{
 
-    model.set(GRB_IntParam_Presolve, 0);
-    model.set(GRB_IntParam_NonConvex, 2);
-    // Optimize
-    model.update();
-    //model.reset(0);
-    model.optimize();
+        model.set(GRB_IntParam_Presolve, 0);
+        model.set(GRB_IntParam_NonConvex, 2);
+        // Optimize
+        model.update();
+        //model.reset(0);
+        model.optimize();
     }
     catch (GRBException e)
     {
