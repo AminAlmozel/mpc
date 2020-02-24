@@ -244,6 +244,17 @@ private:
     double* pub = new double[N * 3]{ GRB_INFINITY };
     char* ptype = new char[N * 3]{ GRB_CONTINUOUS };
 
+    // Auxiliary variables for use in the nonlinear model
+    GRBVar* cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+    GRBVar* sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+    GRBVar* T = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* c6s7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* c6s7c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* s6s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* c6s7s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* s8c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* c6c7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+
     // Array to store the constraints to remove them quickly
     GRBQConstr* colli_con = new GRBQConstr[N];
     GRBConstr* initial_st = new GRBConstr[n_st];
@@ -251,6 +262,7 @@ private:
     double u_bar = 0.62; // From experimentation
 
     bool firstIteration = 1;
+    bool modelUsed = 0; // 0 for nonlinear model
     double* parameters;
 
     //ros::NodeHandle* n;
@@ -259,18 +271,6 @@ private:
     ros::Subscriber sub;
 
     geometry_msgs::PoseArray path;
-
-};
-
-void mpc::nlquadModel() {
-    // INCOMPELETE
-
-    GRBQuadExpr xdot[3] = 0;
-    GRBLinExpr xdotLin[6] = 0;
-    GRBQuadExpr xdotQuad[3] = 0;
-
-    // u_bar is used for the linear model, so setting it to 0 here if the non linear model is used
-    u_bar = 0;
 
     // Constants
     double g = 9.81;
@@ -286,9 +286,23 @@ void mpc::nlquadModel() {
     double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
     double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
 
+};
+
+void mpc::nlquadModel() {
+    // INCOMPELETE
+    modelUsed = 0;
+    //GRBQuadExpr xdot[3] = 0;
+    GRBLinExpr xdotLin[6] = 0;
+    GRBQuadExpr xdotQuad[6] = 0;
+
+    // u_bar is used for the linear model, so setting it to 0 here if the non linear model is used
+    u_bar = 0;
+
+    // Constants are defined as private class attributes 
     
     // Change the lower bound, upper bound, and type
     // Working around the nonlinearities by defining new variables 
+    /*
     GRBVar* cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
     GRBVar* sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
     GRBVar* T = model.addVars(xlb, xub, NULL, xtype, NULL, N);
@@ -298,6 +312,7 @@ void mpc::nlquadModel() {
     GRBVar* c6s7s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
     GRBVar* s8c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
     GRBVar* c6c7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    */
 
     for(int n = 0; n < N; n++){
         model.addGenConstrSin(x[n * n_st + 6], sx[3 * n + 0]);
@@ -390,6 +405,7 @@ void mpc::nlquadModel() {
 }
 
 void mpc::lquadModel() {
+    modelUsed = 1;
     // Since it's a linear model, try to keep the yaw around 0
     GRBQuadExpr yaw = 0;
     for (int n = 0; n < N; n++){
@@ -397,19 +413,7 @@ void mpc::lquadModel() {
     }
     model.setObjective(model.getObjective() + yaw, GRB_MINIMIZE);
 
-    // Constants
-    double g = 9.81;
-    double m = 1; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    double l = 0.2275; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    //AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    //AirLib / include / vehicles / multirotor / MultiRotorParams.hpp
-    // and plugging the two links into matlab
-    double Ix = 0.0066;
-    double Iy = 0.0079;
-    double Iz = 0.0143;
-    double Jr = 6e-5;
-    double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
-    double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+    // Constants are defined as private class attributes 
 
     double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
         {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -589,73 +593,111 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     }
     firstIteration = 0;
 
-    // Constants
-    double g = 9.81;
-    double m = 1; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    double l = 0.2275; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    //AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    //AirLib / include / vehicles / multirotor / MultiRotorParams.hpp
-    // and plugging the two links into matlab
-    double Ix = 0.0066;
-    double Iy = 0.0079;
-    double Iz = 0.0143;
-    double Jr = 6e-5;
-    double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
-    double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
-    double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
-        {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, g, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, -g, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
+    if(modelUsed){ // 1 for linear model
+        double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
+            {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 0, 0, g, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 0, -g, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
 
-    double B[12][4] = {
-        {0, 0, 0, 0},
-        {0, 0, 0, 0},
-        {0, 0, 0, 0},
-        {0, 0, 0, 0},
-        {0, 0, 0, 0},
-        {1/m, 0, 0, 0},
-        {0, 0, 0, 0},
-        {0, 0, 0, 0},
-        {0, 0, 0, 0},
-        {0, l/Ix, 0, 0},
-        {0, 0, l/Iy, 0},
-        {0, 0, 0, l/Iz} };
-    // Adding the new ones
-    GRBLinExpr dx = 0;
-    for (int i = 0; i < mpc::n_st; i++) {
+        double B[12][4] = {
+            {0, 0, 0, 0},
+            {0, 0, 0, 0},
+            {0, 0, 0, 0},
+            {0, 0, 0, 0},
+            {0, 0, 0, 0},
+            {1/m, 0, 0, 0},
+            {0, 0, 0, 0},
+            {0, 0, 0, 0},
+            {0, 0, 0, 0},
+            {0, l/Ix, 0, 0},
+            {0, 0, l/Iy, 0},
+            {0, 0, 0, l/Iz} };
+        // Adding the new ones
+        GRBLinExpr dx = 0;
+        for (int i = 0; i < mpc::n_st; i++) {
+            int n = 0;
+            dx = 0;
+            for (int j = 0; j < mpc::n_st; j++) {
+                if (A[i][j] != 0)
+                    dx += A[i][j] * x0[j];
+            }
+            for (int k = 0; k < mpc::n_con; k++) {
+                if (B[i][k] != 0)
+                    dx += B[i][k] * mpc::u[k];
+            }
+
+
+            // x_t+1 = x_t + (A*x_t + B*u_t) * dt
+            //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
+            initial_st[i] = mpc::model.addConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
+
+            /*
+            printf("%f *", modelConstraint.getCoeff(0));
+            cout << modelConstraint.getVar(0).get(GRB_StringAttr_VarName) << endl;
+            printf("%f *", modelConstraint.getCoeff(1));
+            cout << modelConstraint.getVar(1).get(GRB_StringAttr_VarName) << endl;
+            */
+            //mpc::model.addConstr(x[i] == x0[i]);
+        }
+
+    }
+    else{ // For nonlinear model
         int n = 0;
-        dx = 0;
-        for (int j = 0; j < mpc::n_st; j++) {
-            if (A[i][j] != 0)
-                dx += A[i][j] * x0[j];
+        GRBLinExpr xdotLin[6] = 0;
+        GRBQuadExpr xdotQuad[6] = 0;
+        //xd
+        xdotLin[0] = x[n * n_st + 3];
+        // yd
+        xdotLin[1] = x[n * n_st + 4];
+        // zd
+        xdotLin[2] = x[n * n_st + 5];
+        // xdd, horizontal
+        //xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * cos(x[n * n_st + 8]) + sin(x[n * n_st + 6]) * sin(x[n * n_st + 8]));
+        xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
+        // ydd, horizontal
+        //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 8]) * cos(x[n * n_st + 8]));
+        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s8c8[n]);
+        // MAKE SURE OF THE - g
+        // zdd, height
+        //xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * cos(x[n * n_st + 7])) - g;
+        xdotQuad[2] = cT * T[n] / m * c6c7[n] - g;
+        // Rolld, phi
+        xdotLin[4] = x[n * n_st + 9];
+        // Pitchd, theta
+        xdotLin[5] = x[n * n_st + 10];
+        // Yawd, psi
+        xdotLin[6] = x[n * n_st + 11];
+        // Rolldd, phi
+        xdotQuad[3] = (Iy - Iz) / Ix * x[n * n_st + 10] * x[n * n_st + 11] + cT * l * (u[n * n_con + 3] * u[n * n_con + 3] - u[n * n_con + 1] * u[n * n_con + 1]) / Ix;
+        // Pitchdd, theta
+        xdotQuad[4] = (Iz - Ix) / Iy * x[n * n_st + 9] * x[n * n_st + 11] + cT * l * (u[n * n_con + 2] * u[n * n_con + 2] - u[n * n_con + 0] * u[n * n_con + 0]) / Iy;
+        // Yawdd, psi
+        xdotQuad[5] = (Ix - Iy) / Iz * x[n * n_st + 9] * x[n * n_st + 10] + cQ * (-u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] - u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / Iz;
+
+        // Adding linear constraints
+        for(int i = 0; i < 6; i++){
+            GRBLinExpr modelConstraint = 0;
+            // x(t+1) = x(t) + xdot*dt
+            modelConstraint = x[n * n_st + i] + xdotLin[i] * dt - x[(n + 1) * n_st + i];
+            mpc::model.addConstr(modelConstraint == 0);
         }
-        for (int k = 0; k < mpc::n_con; k++) {
-            if (B[i][k] != 0)
-                dx += B[i][k] * mpc::u[k];
+
+        // Adding quadractic constraints
+        for(int i = 0; i < 3; i++){
+            GRBQuadExpr modelConstraint = 0;
+            // x(t+1) = x(t) + xdot*dt
+            modelConstraint = x[n * n_st + i] + xdotQuad[i] * dt - x[(n + 1) * n_st + i];
+            mpc::model.addQConstr(modelConstraint == 0);
         }
-
-
-        // x_t+1 = x_t + (A*x_t + B*u_t) * dt
-        //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
-        initial_st[i] = mpc::model.addConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
-
-        /*
-        printf("%f *", modelConstraint.getCoeff(0));
-        cout << modelConstraint.getVar(0).get(GRB_StringAttr_VarName) << endl;
-        printf("%f *", modelConstraint.getCoeff(1));
-        cout << modelConstraint.getVar(1).get(GRB_StringAttr_VarName) << endl;
-        */
-        //mpc::model.addConstr(x[i] == x0[i]);
-
     }
 
     // Adding the collision constraints to the optimization problem
@@ -671,12 +713,27 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 void mpc::pubCont() {
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
     geometry_msgs::Quaternion cont;
+    double U[4] = {
+    u[0].get(GRB_DoubleAttr_X), 
+    u[1].get(GRB_DoubleAttr_X), 
+    u[2].get(GRB_DoubleAttr_X), 
+    u[3].get(GRB_DoubleAttr_X)};
 
     // Getting the control input from the solution of the optimization problem
-    cont.x = u[0].get(GRB_DoubleAttr_X);
-    cont.y = u[1].get(GRB_DoubleAttr_X);
-    cont.z = u[2].get(GRB_DoubleAttr_X);
-    cont.w = u[3].get(GRB_DoubleAttr_X);
+    if(modelUsed){ // modelUsed = 1 for the linear model
+        cont.x = U[0];
+        cont.y = U[1];
+        cont.z = U[2];
+        cont.w = U[3];
+    }
+    else{
+        cont.x = cT * (U[0] * U[0] + U[1] * U[1] + U[2] * U[2] + U[3] * U[3]);
+        cont.y = cT * l * (- U[1] * U[1] + U[3] * U[3]);
+        cont.z = cT * l * (- U[0] * U[0] + U[2] * U[2]);
+        cont.w = cT * l * (- U[0] * U[0] + U[1] * U[1] - U[2] * U[2] + U[3] * U[3]);
+    }
+
+    
 
     cont.x += u_bar;
 
