@@ -15,7 +15,7 @@
 //#include <valarray>
 using namespace std;
 
-#define N 20
+#define N 5
 
 #define f 10.0
 
@@ -27,8 +27,6 @@ public: // Access specifier
         pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
         pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
 
-
-        
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
         double rpAngle = 30 * M_PI / 180; // 30 degress
         double yAngle = 180 * M_PI / 180; // 30 degress
@@ -113,16 +111,16 @@ public: // Access specifier
                 uub[i] = 1 - u_bar;
             }
             if (i % n_con == 2) {
-                ulb[i] = -rpb;
-                uub[i] = rpb;
+                ulb[i] = 0;
+                uub[i] = 1;
             }
             if (i % n_con == 3) {
-                ulb[i] = -rpb;
-                uub[i] = rpb;
+                ulb[i] = 0;
+                uub[i] = 1;
             }
             if (i % n_con == 0) {
-                ulb[i] = -yb;
-                uub[i] = yb;
+                ulb[i] = 0;
+                uub[i] = 1;
             }
 
         }
@@ -131,11 +129,17 @@ public: // Access specifier
         x = model.addVars(xlb, xub, NULL, xtype, NULL, (int)n_st * N);
         u = model.addVars(ulb, uub, NULL, utype, NULL, (int)n_con * N);
         p = model.addVars(plb, pub, NULL, ptype, NULL, (int)3 * N);
-
-        // Adding the model constraints
-        //kineticModel();
-        //lquadModel();
-        nlquadModel();
+        
+        // Auxiliary variables for use in the nonlinear model
+        cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+        sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+        T = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        c6s7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        c6s7c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        s6s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        c6s7s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        s8c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        c6c7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
 
 
         // Computing the objective, in terms of the parameter p
@@ -156,9 +160,9 @@ public: // Access specifier
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
         for (int n = 0; n < N; n++){ // For each time step
-            temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
-            temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
-            temp[2] = x[n * n_st + 2] - p[n * 3 + 2];
+            temp[0] = x[n * n_st + 0] - 1.65;//p[n * 3 + 0];
+            temp[1] = x[n * n_st + 1] - 2;//p[n * 3 + 1];
+            temp[2] = x[n * n_st + 2] - 0.3;//p[n * 3 + 2];
             // Quad part (in the form of xT*Q*x), 3 for x, y, z states
             for (int i = 0; i < 3; i++){ 
                 for (int j = 0; j < 3; j++){
@@ -181,13 +185,20 @@ public: // Access specifier
                 }
             }
         }
-
+        obj = 0;
         model.setObjective(obj);
+
         pHandle = new GRBConstr[3 * N];
         
         for(int i = 0; i < 3 * N; i++){
             pHandle[i] = model.addConstr(p[i] == 0);
         }
+
+        // Adding the model constraints
+
+        //kineticModel();
+        //lquadModel();
+        nlquadModel();
         
         //pHandle = model.addConstrs(p == 0);
         
@@ -245,19 +256,19 @@ private:
     char* ptype = new char[N * 3]{ GRB_CONTINUOUS };
 
     // Auxiliary variables for use in the nonlinear model
-    GRBVar* cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
-    GRBVar* sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
-    GRBVar* T = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-    GRBVar* c6s7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-    GRBVar* c6s7c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-    GRBVar* s6s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-    GRBVar* c6s7s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-    GRBVar* s8c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-    GRBVar* c6c7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+    GRBVar* cx;
+    GRBVar* sx;
+    GRBVar* T;
+    GRBVar* c6s7;
+    GRBVar* c6s7c8;
+    GRBVar* s6s8;
+    GRBVar* c6s7s8;
+    GRBVar* s8c8;
+    GRBVar* c6c7;
 
     // Array to store the constraints to remove them quickly
     GRBQConstr* colli_con = new GRBQConstr[N];
-    GRBConstr* initial_st = new GRBConstr[n_st];
+    GRBQConstr* initial_st = new GRBQConstr[n_st];
 
     double u_bar = 0.62; // From experimentation
 
@@ -284,7 +295,7 @@ private:
     double Iz = 0.0143;
     double Jr = 6e-5;
     double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
-    double cQ = 0.055562; // Called cP, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+    double cQ = 1.3/4; // Drag coefficient, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
 
 };
 
@@ -315,6 +326,7 @@ void mpc::nlquadModel() {
     */
 
     for(int n = 0; n < N; n++){
+        /*
         model.addGenConstrSin(x[n * n_st + 6], sx[3 * n + 0]);
         model.addGenConstrSin(x[n * n_st + 7], sx[3 * n + 1]);
         model.addGenConstrSin(x[n * n_st + 8], sx[3 * n + 2]);
@@ -329,8 +341,10 @@ void mpc::nlquadModel() {
         model.addQConstr(c6s7s8[n] - c6s7[n] * sx[3 * n + 2] == 0);
         model.addQConstr(s8c8[n] - sx[3 * n + 2] * cx[3 * n + 2] == 0);
         model.addQConstr(c6c7[n] - cx[3 * n + 0] * cx[3 * n + 1] == 0);
+        */
     }
-    
+
+
 
     for(int n = 0; n < N - 1; n++){ // The last time step is constraint to the time step before it
         //xd
@@ -344,17 +358,17 @@ void mpc::nlquadModel() {
         xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
         // ydd, horizontal
         //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 8]) * cos(x[n * n_st + 8]));
-        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s8c8[n]);
+        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] - s8c8[n]);
         // MAKE SURE OF THE - g
         // zdd, height
         //xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * cos(x[n * n_st + 7])) - g;
         xdotQuad[2] = cT * T[n] / m * c6c7[n] - g;
         // Rolld, phi
-        xdotLin[4] = x[n * n_st + 9];
+        xdotLin[3] = x[n * n_st + 9];
         // Pitchd, theta
-        xdotLin[5] = x[n * n_st + 10];
+        xdotLin[4] = x[n * n_st + 10];
         // Yawd, psi
-        xdotLin[6] = x[n * n_st + 11];
+        xdotLin[5] = x[n * n_st + 11];
         // Rolldd, phi
         xdotQuad[3] = (Iy - Iz) / Ix * x[n * n_st + 10] * x[n * n_st + 11] + cT * l * (u[n * n_con + 3] * u[n * n_con + 3] - u[n * n_con + 1] * u[n * n_con + 1]) / Ix;
         // Pitchdd, theta
@@ -371,35 +385,13 @@ void mpc::nlquadModel() {
         }
 
         // Adding quadractic constraints
-        for(int i = 0; i < 3; i++){
+        for(int i = 0; i < 6; i++){
             GRBQuadExpr modelConstraint = 0;
             // x(t+1) = x(t) + xdot*dt
             modelConstraint = x[n * n_st + i] + xdotQuad[i] * dt - x[(n + 1) * n_st + i];
             mpc::model.addQConstr(modelConstraint == 0);
         }
 
-        /*
-        double intv = 1e-3;
-        double xmax = log(9.0);
-        int len = (int) ceil(xmax/intv) + 1;
-        double* xpts = new double[len];
-        double* upts = new double[len];
-        for (int i = 0; i < len; i++) {
-            xpts[i] = i*intv;
-            upts[i] = fx(i*intv);
-        }
-        model.addGenConstrPWL(x[0], u[0], len, xpts, upts, "gc1");
-        */
-
-        /*
-        for(int i = 0; i < n_st; i++){
-            // Change to non linear
-            GRBGenExpr modelConstraint = 0;
-            // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i] + xdot[i] * dt - x[(n + 1) * n_st + i];
-            mpc::model.addConstr(modelConstraint == 0);
-        }
-        */
     }
 
 }
@@ -555,15 +547,16 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         parameters[n * 3 + 1] = path->poses[n].position.y;
         parameters[n * 3 + 2] = path->poses[n].position.z;
         */
-        parameters[n * 3 + 0] = path->poses[N].position.x + 10;
-        parameters[n * 3 + 1] = path->poses[N].position.y;
-        parameters[n * 3 + 2] = path->poses[N].position.z + 3;
+        parameters[n * 3 + 0] = 1.65;
+        parameters[n * 3 + 1] = 2;
+        parameters[n * 3 + 2] = 0.3;
 
     }
-
+    /*
     for(int i = 0; i < 3 * N; i++){
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
     }
+    */
     //pHandle->set(GRB_DoubleAttr_RHS, parameters);
 
     // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
@@ -581,13 +574,16 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         path->poses[N+1].orientation.y,
         path->poses[N+1].orientation.z
     };
+    
     for(int i = 0; i < n_st; i++){
         std::cout << x0[i] << ", ";
     }
     std::cout << std::endl;
+    
     // Removing old initial state constraints
     if (!firstIteration){
-        for(int i = 0; i < n_st; i++){
+        for(int i = 0; i < 4; i++){
+            std::cout << std::endl;
             model.remove(initial_st[i]);
         }
     }
@@ -638,7 +634,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
             // x_t+1 = x_t + (A*x_t + B*u_t) * dt
             //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
-            initial_st[i] = mpc::model.addConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
+            initial_st[i] = mpc::model.addQConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
 
             /*
             printf("%f *", modelConstraint.getCoeff(0));
@@ -652,61 +648,65 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     }
     else{ // For nonlinear model
         int n = 0;
-        GRBLinExpr xdotLin[6] = 0;
-        GRBQuadExpr xdotQuad[6] = 0;
+        GRBQuadExpr xdot[12] = 0;
         //xd
-        xdotLin[0] = x[n * n_st + 3];
+        xdot[0] = x0[n * n_st + 3];
         // yd
-        xdotLin[1] = x[n * n_st + 4];
+        xdot[1] = x0[n * n_st + 4];
         // zd
-        xdotLin[2] = x[n * n_st + 5];
+        xdot[2] = x0[n * n_st + 5];
         // xdd, horizontal
-        //xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * cos(x[n * n_st + 8]) + sin(x[n * n_st + 6]) * sin(x[n * n_st + 8]));
-        xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
+        xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * cos(x0[n * n_st + 8]) + sin(x0[n * n_st + 6]) * sin(x0[n * n_st + 8]));
+        //xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
         // ydd, horizontal
-        //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 8]) * cos(x[n * n_st + 8]));
-        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s8c8[n]);
+        xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * sin(x0[n * n_st + 8]) - sin(x0[n * n_st + 8]) * cos(x0[n * n_st + 8]));
+        //xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s8c8[n]);
         // MAKE SURE OF THE - g
         // zdd, height
-        //xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * cos(x[n * n_st + 7])) - g;
-        xdotQuad[2] = cT * T[n] / m * c6c7[n] - g;
+        xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * cos(x0[n * n_st + 7])) - g;
+        //xdotQuad[2] = cT * T[n] / m * c6c7[n] - g;
         // Rolld, phi
-        xdotLin[4] = x[n * n_st + 9];
+        xdot[6] = x0[n * n_st + 9];
         // Pitchd, theta
-        xdotLin[5] = x[n * n_st + 10];
+        xdot[7] = x0[n * n_st + 10];
         // Yawd, psi
-        xdotLin[6] = x[n * n_st + 11];
+        xdot[8] = x0[n * n_st + 11];
         // Rolldd, phi
-        xdotQuad[3] = (Iy - Iz) / Ix * x[n * n_st + 10] * x[n * n_st + 11] + cT * l * (u[n * n_con + 3] * u[n * n_con + 3] - u[n * n_con + 1] * u[n * n_con + 1]) / Ix;
+        xdot[9] = (Iy - Iz) / Ix * x0[n * n_st + 10] * x0[n * n_st + 11] + cT * l * (u[n * n_con + 3] * u[n * n_con + 3] - u[n * n_con + 1] * u[n * n_con + 1]) / Ix;
         // Pitchdd, theta
-        xdotQuad[4] = (Iz - Ix) / Iy * x[n * n_st + 9] * x[n * n_st + 11] + cT * l * (u[n * n_con + 2] * u[n * n_con + 2] - u[n * n_con + 0] * u[n * n_con + 0]) / Iy;
+        xdot[10] = (Iz - Ix) / Iy * x0[n * n_st + 9] * x0[n * n_st + 11] + cT * l * (u[n * n_con + 2] * u[n * n_con + 2] - u[n * n_con + 0] * u[n * n_con + 0]) / Iy;
         // Yawdd, psi
-        xdotQuad[5] = (Ix - Iy) / Iz * x[n * n_st + 9] * x[n * n_st + 10] + cQ * (-u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] - u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / Iz;
+        xdot[11] = (Ix - Iy) / Iz * x0[n * n_st + 9] * x0[n * n_st + 10] + cQ * (-u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] - u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / Iz;
 
         // Adding linear constraints
-        for(int i = 0; i < 6; i++){
-            GRBLinExpr modelConstraint = 0;
-            // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i] + xdotLin[i] * dt - x[(n + 1) * n_st + i];
-            mpc::model.addConstr(modelConstraint == 0);
-        }
-
-        // Adding quadractic constraints
-        for(int i = 0; i < 3; i++){
+        for(int i = 0; i < n_st; i++){
             GRBQuadExpr modelConstraint = 0;
             // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i] + xdotQuad[i] * dt - x[(n + 1) * n_st + i];
-            mpc::model.addQConstr(modelConstraint == 0);
+            modelConstraint = x0[i] + xdot[i] * dt - x[i];
+            initial_st[i] = mpc::model.addQConstr(modelConstraint == 0);
         }
     }
 
     // Adding the collision constraints to the optimization problem
     //collision(opponent);
+    try{
 
+    model.set(GRB_IntParam_Presolve, 0);
+    model.set(GRB_IntParam_NonConvex, 2);
     // Optimize
     model.update();
     //model.reset(0);
     model.optimize();
+    }
+    catch (GRBException e)
+    {
+        cout << "Error code = " << e.getErrorCode() << endl;
+        cout << e.getMessage() << endl;
+    }
+    catch (...)
+    {
+        cout << "Error during optimization" << endl;
+    }
 
 }
 
@@ -722,9 +722,9 @@ void mpc::pubCont() {
     // Getting the control input from the solution of the optimization problem
     if(modelUsed){ // modelUsed = 1 for the linear model
         cont.x = U[0];
-        cont.y = U[1];
-        cont.z = U[2];
-        cont.w = U[3];
+        cont.y = cT * l * U[1];
+        cont.z = cT * l * U[2];
+        cont.w = cT * l * U[3];
     }
     else{
         cont.x = cT * (U[0] * U[0] + U[1] * U[1] + U[2] * U[2] + U[3] * U[3]);
@@ -777,8 +777,8 @@ void mpc::mpcCallback(const geometry_msgs::PoseArray::ConstPtr& msg){
     //collision(); // Adding collision constraints
 
     mpcSetup(msg);
-    pubCont();
-    pubTraj();
+    //pubCont();
+    //pubTraj();
 
 }
 
