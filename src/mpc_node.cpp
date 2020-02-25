@@ -1,10 +1,11 @@
-/* Game Theory Planner */
-
+/* Model Predictive Control */
+// Give the nonlinear model a warm start
 // Set a 2 second time limit
 //m->set(GRB_DoubleParam_TimeLimit, 2);
 
 #include "ros/ros.h"
 #include "gurobi_c++.h"
+//#include <nlopt.hpp>
 
 #include "nav_msgs/Path.h"
 #include "geometry_msgs/PoseArray.h"
@@ -15,7 +16,7 @@
 //#include <valarray>
 using namespace std;
 
-#define N 5
+#define N 20
 
 #define f 10.0
 
@@ -30,68 +31,25 @@ public: // Access specifier
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
         double rpAngle = 30 * M_PI / 180; // 30 degress
         double yAngle = 180 * M_PI / 180; // 30 degress
+        double xlb0[n_st] = {-GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY};
+        double xub0[n_st] = {GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY};
         for (int i = 0; i < n_st * N; i++) {
             xtype[i] = GRB_CONTINUOUS;
-            // x
-            if (i % n_st == 1) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // y
-            if (i % n_st == 2) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // z
-            if (i % n_st == 3) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // x dot
-            if (i % n_st == 4) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // y dot
-            if (i % n_st == 5) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // z dot
-            if (i % n_st == 6) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // Roll, phi
-            if (i % n_st == 7) {
-                xlb[i] = -GRB_INFINITY;//rpAngle;
-                xub[i] = GRB_INFINITY;//rpAngle;
-            }
-            // Pitch, theta
-            if (i % n_st == 8) {
-                xlb[i] = -GRB_INFINITY;//rpAngle;
-                xub[i] = GRB_INFINITY;//rpAngle;
-            }
-            // Yaw, psi
-            if (i % n_st == 9) {
-                xlb[i] = -GRB_INFINITY;//yAngle;
-                xub[i] = GRB_INFINITY;//yAngle;
-            }
-            // Roll dot, phi
-            if (i % n_st == 10) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // Pitch dot, theta
-            if (i % n_st == 11) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
-            // Yaw dot, psi
-            if (i % n_st == 0) {
-                xlb[i] = -GRB_INFINITY;
-                xub[i] = GRB_INFINITY;
-            }
+            xlb[i] = xlb0[ i % n_st ];
+            xub[i] = xub0[ i % n_st ];
+        }
+
+        if (~modelUsed){ u_bar = 0;}
+        double rpb = 2.90; // Roll rate, pitch rate bound
+        double yb = 3.793; // Yaw bound, through experimentation
+        // TODO: give proper values for the boundaries
+        double ulb0[n_con] = {0 - u_bar, 0, 0, 0};
+        double uub0[n_con] = {1 - u_bar, 1, 1, 1};
+
+        for (int i = 0; i < n_con * N; i++) {
+            utype[i] = GRB_CONTINUOUS;
+            ulb[i] = ulb0[ i % n_con ];
+            uub[i] = uub0[ i % n_con ];
         }
 
         for (int i = 0; i < 3 * N; i++) {
@@ -100,46 +58,24 @@ public: // Access specifier
             pub[i] = GRB_INFINITY;
         }
 
-        u_bar = 0;
-        double rpb = 2.90; // Roll rate, pitch rate bound
-        double yb = 3.793; // Yaw bound, through experimentation
-        // TODO: give proper values for the boundaries
-        for (int i = 0; i < n_con * N; i++) {
-            utype[i] = GRB_CONTINUOUS;
-            if (i % n_con == 1) {
-                ulb[i] = 0 - u_bar;
-                uub[i] = 1 - u_bar;
-            }
-            if (i % n_con == 2) {
-                ulb[i] = 0;
-                uub[i] = 1;
-            }
-            if (i % n_con == 3) {
-                ulb[i] = 0;
-                uub[i] = 1;
-            }
-            if (i % n_con == 0) {
-                ulb[i] = 0;
-                uub[i] = 1;
-            }
-
-        }
-
         // Adding the variables, and setting constraints on the variables
         x = model.addVars(xlb, xub, NULL, xtype, NULL, (int)n_st * N);
         u = model.addVars(ulb, uub, NULL, utype, NULL, (int)n_con * N);
         p = model.addVars(plb, pub, NULL, ptype, NULL, (int)3 * N);
         
-        // Auxiliary variables for use in the nonlinear model
-        cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
-        sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
-        T = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-        c6s7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-        c6s7c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-        s6s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-        c6s7s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-        s8c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
-        c6c7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        if (~modelUsed){ // 0 For the nonlinear model
+            // Auxiliary variables for use in the nonlinear model
+            cx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+            sx = model.addVars(xlb, xub, NULL, xtype, NULL, 3 * N);
+            T = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+            c6s7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+            c6s7c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+            s6s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+            c6s7s8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+            s6c8 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+            c6c7 = model.addVars(xlb, xub, NULL, xtype, NULL, N);
+        }
+
 
 
         // Computing the objective, in terms of the parameter p
@@ -185,7 +121,7 @@ public: // Access specifier
                 }
             }
         }
-        obj = 0;
+
         model.setObjective(obj);
 
         pHandle = new GRBConstr[3 * N];
@@ -197,8 +133,8 @@ public: // Access specifier
         // Adding the model constraints
 
         //kineticModel();
-        //lquadModel();
-        nlquadModel();
+        lquadModel();
+        //nlquadModel();
         
         //pHandle = model.addConstrs(p == 0);
         
@@ -263,14 +199,14 @@ private:
     GRBVar* c6s7c8;
     GRBVar* s6s8;
     GRBVar* c6s7s8;
-    GRBVar* s8c8;
+    GRBVar* s6c8;
     GRBVar* c6c7;
 
     // Array to store the constraints to remove them quickly
     GRBQConstr* colli_con = new GRBQConstr[N];
     GRBQConstr* initial_st = new GRBQConstr[n_st];
 
-    double u_bar = 0.62; // From experimentation
+
 
     bool firstIteration = 1;
     bool modelUsed = 0; // 0 for nonlinear model
@@ -296,6 +232,8 @@ private:
     double Jr = 6e-5;
     double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
     double cQ = 1.3/4; // Drag coefficient, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+
+    double u_bar = 0.62; // From experimentation
 
 };
 
@@ -339,7 +277,7 @@ void mpc::nlquadModel() {
         model.addQConstr(c6s7c8[n] - c6s7[n] * cx[3 * n + 2] == 0);
         model.addQConstr(s6s8[n] - sx[3 * n + 0] * sx[3 * n + 2] == 0);
         model.addQConstr(c6s7s8[n] - c6s7[n] * sx[3 * n + 2] == 0);
-        model.addQConstr(s8c8[n] - sx[3 * n + 2] * cx[3 * n + 2] == 0);
+        model.addQConstr(s6c8[n] - sx[3 * n + 0] * cx[3 * n + 2] == 0);
         model.addQConstr(c6c7[n] - cx[3 * n + 0] * cx[3 * n + 1] == 0);
         
     }
@@ -357,8 +295,8 @@ void mpc::nlquadModel() {
         //xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * cos(x[n * n_st + 8]) + sin(x[n * n_st + 6]) * sin(x[n * n_st + 8]));
         xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
         // ydd, horizontal
-        //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 8]) * cos(x[n * n_st + 8]));
-        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] - s8c8[n]);
+        //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 6]) * cos(x[n * n_st + 8]));
+        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s6c8[n]);
         // MAKE SURE OF THE - g
         // zdd, height
         //xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * cos(x[n * n_st + 7])) - g;
@@ -544,23 +482,6 @@ void mpc::collision(mpc* opponent) {
 }
 
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
-    // Getting the parameters (reference path) from the received message, and using them as equality constraints
-    for (int n = 0; n < N; n++){
-    /*
-        parameters[n * 3 + 0] = path->poses[n].position.x;
-        parameters[n * 3 + 1] = path->poses[n].position.y;
-        parameters[n * 3 + 2] = path->poses[n].position.z;
-        */
-        parameters[n * 3 + 0] = 1.65;
-        parameters[n * 3 + 1] = 2;
-        parameters[n * 3 + 2] = 0.3;
-
-    }
-    
-    for(int i = 0; i < 3 * N; i++){
-        pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
-    }
-    
     //pHandle->set(GRB_DoubleAttr_RHS, parameters);
 
     // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
@@ -583,6 +504,47 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         std::cout << x0[i] << ", ";
     }
     std::cout << std::endl;
+
+
+    // Transforming the coords to align it with the yaw (nessecary for the linear model to work)
+    // Setting the yaw to 0
+    double yaw = x0[5];
+    x0[5] = 0;
+    double rot[3][3] = 
+    {{cos(yaw), -sin(yaw), 0},
+    {sin(yaw), cos(yaw), 0},
+    {0, 0, 1}};
+
+    double p_i[3] = {1.65, 2, 0.3};
+    // Getting the parameters (reference path) from the received message, and using them as equality constraints    
+    for (int n = 0; n < N; n++){
+    /*
+        parameters[n * 3 + 0] = path->poses[n].position.x;
+        parameters[n * 3 + 1] = path->poses[n].position.y;
+        parameters[n * 3 + 2] = path->poses[n].position.z;
+        */
+        parameters[n * 3 + 0] = 1.65;
+        parameters[n * 3 + 1] = 2;
+        parameters[n * 3 + 2] = 0.3;
+
+    }
+
+
+    for (int n = 0; n < N; n++){
+        for (int i = 0; i < 3; i++){
+            double k = 0;
+            for( int j = 0; j < 3; j++){
+                k += rot[i][j] * parameters[n * 3 + j];
+            }
+            parameters[n * 3 + i] = k;
+        }
+    }
+    
+    for(int i = 0; i < 3 * N; i++){
+        pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
+    }
+
+    // 
     
     // Removing old initial state constraints
     if (!firstIteration){
@@ -663,7 +625,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * cos(x0[n * n_st + 8]) + sin(x0[n * n_st + 6]) * sin(x0[n * n_st + 8]));
         //xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
         // ydd, horizontal
-        xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * sin(x0[n * n_st + 8]) - sin(x0[n * n_st + 8]) * cos(x0[n * n_st + 8]));
+        xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * sin(x0[n * n_st + 8]) - sin(x0[n * n_st + 6]) * cos(x0[n * n_st + 8]));
         //xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s8c8[n]);
         // MAKE SURE OF THE - g
         // zdd, height
@@ -695,7 +657,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     //collision(opponent);
     try{
 
-        model.set(GRB_IntParam_Presolve, 0);
+        //model.set(GRB_IntParam_Presolve, 0);
         model.set(GRB_IntParam_NonConvex, 2);
         // Optimize
         model.update();
