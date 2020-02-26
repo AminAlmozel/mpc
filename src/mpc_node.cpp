@@ -21,10 +21,11 @@ using namespace std;
 
 #define f 10.0
 
-class mpc {       // Iterative Best Response
-public: // Access specifier
+class mpc {
+public:
     mpc(ros::NodeHandle* node){
-        Eigen::Quaterniond q = Eigen::Quaterniond(1, 0, 0, 0);
+
+        Eigen::Matrix<GRBVar, 4, 4> test;
         
         sub = node->subscribe("gtp", 1, &mpc::mpcCallback, this);
         pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
@@ -35,17 +36,12 @@ public: // Access specifier
         double yAngle = 180 * M_PI / 180; // 30 degress
         double xlb0[n_st] = {-GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY};
         double xub0[n_st] = {GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY};
-        for (int i = 0; i < n_st * N; i++) {
-            xtype[i] = GRB_CONTINUOUS;
-            xlb[i] = xlb0[ i % n_st ];
-            xub[i] = xub0[ i % n_st ];
-        }
 
         if (~linearModel){ u_bar = 0;}
         double rpb = 2.90; // Roll rate, pitch rate bound
-        rpb = 1; // To stay within the linear region
+        rpb = 0.6; // To stay within the linear region
         double yb = 3.793; // Yaw bound, through experimentation
-        yb = 0.6;
+        yb = 0.4;
 
         // TODO: give proper values for the boundaries
         // For the nonlinear model (motor values)
@@ -58,6 +54,11 @@ public: // Access specifier
         double ulb0[n_con] = {0 - u_bar, -rpb, -rpb, -yb};
         double uub0[n_con] = {1 - u_bar, rpb, rpb, yb};
 
+        for (int i = 0; i < n_st * N; i++) {
+            xtype[i] = GRB_CONTINUOUS;
+            xlb[i] = xlb0[ i % n_st ];
+            xub[i] = xub0[ i % n_st ];
+        }
 
         for (int i = 0; i < n_con * N; i++) {
             utype[i] = GRB_CONTINUOUS;
@@ -106,11 +107,12 @@ public: // Access specifier
 
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
+
         //{1.65, 2, 0.04}
         for (int n = 0; n < N; n++){ // For each time step
-            temp[0] = x[n * n_st + 0] - 1.65;//p[n * 3 + 0];
-            temp[1] = x[n * n_st + 1] - 2;//p[n * 3 + 1];
-            temp[2] = x[n * n_st + 2] - 0.04 - 2;//p[n * 3 + 2];
+            temp[0] = x[n * n_st + 0] + 2;//p[n * 3 + 0];
+            temp[1] = x[n * n_st + 1] - 1.65;//p[n * 3 + 1];
+            temp[2] = x[n * n_st + 2] - 0.04 + 2;//p[n * 3 + 2];
             // Quad part (in the form of xT*Q*x), 3 for x, y, z states
             for (int i = 0; i < 3; i++){ 
                 for (int j = 0; j < 3; j++){
@@ -141,10 +143,15 @@ public: // Access specifier
         pHandle = new GRBConstr[3 * N];
         
 
+        // Initializing the parameters
         for(int i = 0; i < 3 * N; i++){
             pHandle[i] = model.addConstr(p[i] == 0);
         }
 
+        for(int i = 0; i < n_st; i++){
+            initial_st[i] = model.addConstr(x[i] == 0);
+        }
+        
         // Adding the model constraints
 
         //kineticModel();
@@ -153,19 +160,11 @@ public: // Access specifier
         
         //pHandle = model.addConstrs(p == 0);
         
-        
         parameters = new double[3 * N];
-        
-        /*
-        // Initilizing to 0's for the first iteration
-        for (int i = 0; i < 3 * N; i++) {
-            p[i] = 0;
-        }
-        for (int i = 0; i < N; i++) {
-            mu[i] = 0;
-        }
-        */
+
+        model.set(GRB_IntParam_OutputFlag, 0);
         model.update();
+
         ROS_INFO_STREAM("Initialized MPC node");
     }
 
@@ -220,12 +219,12 @@ private:
 
     // Array to store the constraints to remove them quickly
     GRBQConstr* colli_con = new GRBQConstr[N];
-    GRBQConstr* initial_st = new GRBQConstr[n_st];
+    GRBConstr* initial_st = new GRBConstr[n_st];
 
 
 
     bool firstIteration = 1;
-    bool linearModel = 0; // 0 for nonlinear model
+    bool linearModel = 1; // 0 for nonlinear model
     double* parameters;
 
     //ros::NodeHandle* n;
@@ -254,6 +253,7 @@ private:
 };
 
 void mpc::nlquadModel() {
+    ROS_WARN_STREAM("Using the nonlinear model!");
     // INCOMPELETE
     linearModel = 0;
     //GRBQuadExpr xdot[3] = 0;
@@ -355,6 +355,7 @@ void mpc::nlquadModel() {
 }
 
 void mpc::lquadModel() {
+    ROS_WARN_STREAM("Using the linear model!");
     linearModel = 1;
     /*
     // Since it's a linear model, try to keep the yaw around 0
@@ -405,7 +406,7 @@ void mpc::lquadModel() {
             }
             for (int k = 0; k < mpc::n_con; k++) {
                 if (B[i][k] != 0)
-                    dx += B[i][k] * mpc::u[(n + 1) * n_con + k];
+                    dx += B[i][k] * mpc::u[n * n_con + k];
             }
             // x_t+1 = x_t + (A*x_t + B*u_t) * dt
             //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
@@ -509,9 +510,9 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         path->poses[N].orientation.x,
         path->poses[N].orientation.y,
         path->poses[N].orientation.z,
-        remainder(path->poses[N+1].position.x, 2 * M_PI),
-        remainder(path->poses[N+1].position.y, 2 * M_PI),
-        remainder(path->poses[N+1].position.z, 2 * M_PI),
+        path->poses[N+1].position.x,
+        path->poses[N+1].position.y,
+        path->poses[N+1].position.z,
         path->poses[N+1].orientation.x,
         path->poses[N+1].orientation.y,
         path->poses[N+1].orientation.z
@@ -527,10 +528,10 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     //double p_i[3] = {x0[0], x0[1], x0[2] + 1};
     //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
     //double p_i[3] = {0.5, -9.7, -0.78};
-    double p_i[3] = {1.65, 2, 0.04 + 3};
+    double p_i[3] = {-2, 1.65, 0.04 + 3};
     // Getting the parameters (reference path) from the received message, and using them as equality constraints    
     for (int n = 0; n < N; n++){
-    /*
+        /*
         parameters[n * 3 + 0] = path->poses[n].position.x;
         parameters[n * 3 + 1] = path->poses[n].position.y;
         parameters[n * 3 + 2] = path->poses[n].position.z;
@@ -542,6 +543,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     }
 
     // Transforming the coords (rotation about z) to align it with the yaw (nessecary for the linear model to work)
+    /*
     // Setting the yaw to 0
     double yaw = - x0[5];
     x0[5] = 0;
@@ -562,24 +564,26 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         parameters[n * 3 + 1] = temp[1];
         parameters[n * 3 + 2] = temp[2];
     }
+    */
     
     for(int i = 0; i < 3 * N; i++){
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
     }
+
+    for(int i = 0; i < n_st; i++){
+        initial_st[i].set(GRB_DoubleAttr_RHS, x0[i]);
+    }
+
     model.update();
+    /*
     for(int i = 0; i < 3 * N; i++){
-        //std::cout << pHandle[i].get(GRB_DoubleAttr_RHS) << ", ";
-        //if ((i + 1) % 3 == 0){ std::cout << std::endl; }
+        std::cout << pHandle[i].get(GRB_DoubleAttr_RHS) << ", ";
+        if ((i + 1) % 3 == 0){ std::cout << std::endl; }
     }
+    */
 
-    // Removing old initial state constraints
-    if (!firstIteration){
-        for(int i = 0; i < n_st; i++){
-            model.remove(initial_st[i]);
-        }
-    }
-    firstIteration = 0;
 
+/*
     if(linearModel){ // 1 for linear model
         double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
             {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -627,13 +631,6 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
             //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
             initial_st[i] = mpc::model.addQConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
 
-            /*
-            printf("%f *", modelConstraint.getCoeff(0));
-            cout << modelConstraint.getVar(0).get(GRB_StringAttr_VarName) << endl;
-            printf("%f *", modelConstraint.getCoeff(1));
-            cout << modelConstraint.getVar(1).get(GRB_StringAttr_VarName) << endl;
-            */
-            //mpc::model.addConstr(x[i] == x0[i]);
         }
 
     }
@@ -677,6 +674,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
             initial_st[i] = mpc::model.addQConstr(modelConstraint == 0);
         }
     }
+    */
 
     // Adding the collision constraints to the optimization problem
     //collision(opponent);
@@ -704,6 +702,25 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 void mpc::pubCont() {
     // Throttle, RPY rates
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
+
+    /*
+    std::cout << "xf: ";
+    for(int i = 0; i < n_st; i++){
+        std::cout << x[(N - 1) * n_st + i].get(GRB_DoubleAttr_X) << ", ";
+        if ((i + 1) % 3 == 0){std::cout << std::endl;}
+    }
+
+    std::cout << "u[i]: ";
+    for(int i = 0; i < N; i++){
+        std::cout << u[i* n_con + 0].get(GRB_DoubleAttr_X) << ", ";
+        //if ((i + 1) % 3 == 0){std::cout << std::endl;}
+    }
+    */
+    std::cout << "p[i]: ";
+    for(int i = 0; i < 3 * N; i++){
+        std::cout << p[i].get(GRB_DoubleAttr_X) << ", ";
+        if ((i + 1) % 3 == 0){std::cout << std::endl;}
+    }
     geometry_msgs::Quaternion cont;
     double U[4] = {
     u[0].get(GRB_DoubleAttr_X), 
@@ -714,9 +731,9 @@ void mpc::pubCont() {
     // Getting the control input from the solution of the optimization problem
     if(linearModel){ // linearModel = 1 for the linear model
         cont.x = U[0] + u_bar;
-        cont.y = cT * l * U[1];
-        cont.z = cT * l * U[2];
-        cont.w = cT * l * U[3];
+        cont.y = U[1];
+        cont.z = U[2];
+        cont.w = U[3];
     }
     else{
         cont.x = cT * (U[0] * U[0] + U[1] * U[1] + U[2] * U[2] + U[3] * U[3]);
