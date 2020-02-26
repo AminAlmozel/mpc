@@ -91,10 +91,10 @@ public: // Access specifier
         {0, 1, 0},
         {0, 0, 1}};
         double R[n_con][n_con] = 
-        {{1, 0, 0, 0},
-        {0, 1, 0, 0},
-        {0, 0, 1, 0},
-        {0, 0, 0, 1}};
+        {{0.01, 0, 0, 0},
+        {0, 0.01, 0, 0},
+        {0, 0, 0.01, 0},
+        {0, 0, 0, 0.01}};
 
         obj = 0;
 
@@ -102,10 +102,11 @@ public: // Access specifier
 
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
+        //{1.65, 2, 0.04}
         for (int n = 0; n < N; n++){ // For each time step
-            temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
-            temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
-            temp[2] = x[n * n_st + 2] - p[n * 3 + 2];
+            temp[0] = x[n * n_st + 0] - 1.65;//p[n * 3 + 0];
+            temp[1] = x[n * n_st + 1] - 2;//p[n * 3 + 1];
+            temp[2] = x[n * n_st + 2] - 0.04 - 2;//p[n * 3 + 2];
             // Quad part (in the form of xT*Q*x), 3 for x, y, z states
             for (int i = 0; i < 3; i++){ 
                 for (int j = 0; j < 3; j++){
@@ -117,7 +118,7 @@ public: // Access specifier
         }
 
         // Constructing the objective
-        /*
+        
         // uT*R*u
         for (int n = 0; n < N; n++){ // For each time step
             // Quad part (in the form of uT*R*u), 4 for u inputs
@@ -129,7 +130,7 @@ public: // Access specifier
                 }
             }
         }
-        */
+        
 
         model.setObjective(obj, GRB_MINIMIZE);
 
@@ -160,6 +161,7 @@ public: // Access specifier
             mu[i] = 0;
         }
         */
+        model.update();
         ROS_INFO_STREAM("Initialized MPC node");
     }
 
@@ -390,7 +392,6 @@ void mpc::lquadModel() {
         {0, 0, 0, l/Iz} };
 
     GRBLinExpr dx = 0;
-    // x_t+1 = A*x_t + B*u_t ???
     for (int n = 0; n < N - 1; n++) {
         for (int i = 0; i < mpc::n_st; i++) {
             dx = 0;
@@ -519,9 +520,10 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     }
     std::cout << std::endl;
 
-    double p_i[3] = {x0[0] + 5, x0[1], x0[2] + 1};
+    //double p_i[3] = {x0[0], x0[1], x0[2] + 1};
+    //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
     //double p_i[3] = {0.5, -9.7, -0.78};
-    //double p_i[3] = {0, 1, 5};
+    double p_i[3] = {1.65, 2, 0.04 + 3};
     // Getting the parameters (reference path) from the received message, and using them as equality constraints    
     for (int n = 0; n < N; n++){
     /*
@@ -559,6 +561,11 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     
     for(int i = 0; i < 3 * N; i++){
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
+    }
+    model.update();
+    for(int i = 0; i < 3 * N; i++){
+        //std::cout << pHandle[i].get(GRB_DoubleAttr_RHS) << ", ";
+        //if ((i + 1) % 3 == 0){ std::cout << std::endl; }
     }
 
     // Removing old initial state constraints
