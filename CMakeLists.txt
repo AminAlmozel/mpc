@@ -22,13 +22,17 @@ endif(GUROBI_FOUND)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
+
 find_package(catkin REQUIRED COMPONENTS
+  catkin_simple REQUIRED
   roscpp
   rospy
   std_msgs
   message_generation
   genmsg
 )
+
+catkin_simple(ALL_DEPS_REQUIRED)
 
 #message(${GUROBI_LIBRARIES})
 

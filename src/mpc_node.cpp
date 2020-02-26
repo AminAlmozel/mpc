@@ -6,6 +6,7 @@
 #include "ros/ros.h"
 #include "gurobi_c++.h"
 //#include <nlopt.hpp>
+#include <Eigen/Dense>
 
 #include "nav_msgs/Path.h"
 #include "geometry_msgs/PoseArray.h"
@@ -23,6 +24,7 @@ using namespace std;
 class mpc {       // Iterative Best Response
 public: // Access specifier
     mpc(ros::NodeHandle* node){
+        Eigen::Quaterniond q = Eigen::Quaterniond(1, 0, 0, 0);
         
         sub = node->subscribe("gtp", 1, &mpc::mpcCallback, this);
         pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
@@ -41,7 +43,9 @@ public: // Access specifier
 
         if (~linearModel){ u_bar = 0;}
         double rpb = 2.90; // Roll rate, pitch rate bound
+        rpb = 1; // To stay within the linear region
         double yb = 3.793; // Yaw bound, through experimentation
+        yb = 0.6;
 
         // TODO: give proper values for the boundaries
         // For the nonlinear model (motor values)
