@@ -39,9 +39,9 @@ public:
 
         if (~linearModel){ u_bar = 0;}
         double rpb = 2.90; // Roll rate, pitch rate bound
-        rpb = 0.6; // To stay within the linear region
+        rpb = 0.3; // To stay within the linear region
         double yb = 3.793; // Yaw bound, through experimentation
-        yb = 0.4;
+        yb = 0.3;
 
         // TODO: give proper values for the boundaries
         // For the nonlinear model (motor values)
@@ -110,9 +110,9 @@ public:
 
         double r[] = {-2, 1.65, 0.1 + 10};
         for (int n = 0; n < N; n++){ // For each time step
-            temp[0] = x[n * n_st + 0] - r[0];//p[n * 3 + 0];
-            temp[1] = x[n * n_st + 1] - r[1];//p[n * 3 + 1];
-            temp[2] = x[n * n_st + 2] - r[2];//p[n * 3 + 2];
+            temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
+            temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
+            temp[2] = x[n * n_st + 2] - p[n * 3 + 2];
             // Quad part (in the form of xT*Q*x), 3 for x, y, z states
             for (int i = 0; i < 3; i++){ 
                 for (int j = 0; j < 3; j++){
@@ -248,7 +248,7 @@ private:
     double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
     double cQ = 1.3/4; // Drag coefficient, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
 
-    double u_bar = 0.62; // From experimentation
+    double u_bar = 0.64; // From experimentation
 
 };
 
@@ -500,7 +500,6 @@ void mpc::collision(mpc* opponent) {
 }
 
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
-    //pHandle->set(GRB_DoubleAttr_RHS, parameters);
 
     // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
     double x0[n_st] = {
@@ -517,32 +516,76 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         path->poses[N+1].orientation.y,
         path->poses[N+1].orientation.z
     };
+
+    // Transforming the coords (rotation about z) to align it with the yaw (nessecary for the linear model to work)
+    Eigen::Matrix3d rot;
+    Eigen::Vector3d v1, v2;
+    rot = Eigen::AngleAxis<double>(-path->poses[N].orientation.z, Eigen::Vector3d::UnitZ());
+
+    // Position
+    v1(0) = path->poses[N].position.x;
+    v1(1) = path->poses[N].position.y;
+    v1(2) = path->poses[N].position.z;
+
+    // Velocity
+    v2(0) = path->poses[N+1].position.x;
+    v2(1) = path->poses[N+1].position.y;
+    v2(2) = path->poses[N+1].position.z;
     
+    // Transforming the position and yaw of the initial state
+    v1 = rot * v1; // Position
+    v2 = rot * v2; // Velocity
+    
+    x0[0] = v1(0);
+    x0[1] = v1(1);
+    x0[2] = v1(2);
+
+    x0[3] = v2(0);
+    x0[4] = v2(1);
+    x0[5] = v2(2);
+
+    // Setting the yaw to 0, since we're alligning the x axis with it
+    x0[8] = 0;
+    
+   //std::cout << "Rotation by: " << -path->poses[N].orientation.z << std::endl;
+   //std::cout << "v: (" << v(0) << ", " << v(1) << ", " << v(2) << ") -> (" << v_rot(0) << ", " << v_rot(1) << ", " << v_rot(2) << ")\n";
+
+    // Transforming the position of the gates
+
+    //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
+    //double p_i[3] = {0.5, -9.7, -0.78};
+    double p_i[3] = {-2, 1.65, 0.1 + 10};
+    // Getting the parameters (reference path) from the received message, and using them as equality constraints    
+    for (int n = 0; n < N; n++){
+        
+        v1(0) = path->poses[n].position.x;
+        v1(1) = path->poses[n].position.y;
+        v1(2) = path->poses[n].position.z;
+        v1 = rot * v1;
+        
+        parameters[n * 3 + 0] = p_i[0];
+        parameters[n * 3 + 1] = p_i[1];
+        parameters[n * 3 + 2] = p_i[2];
+        /*
+        parameters[n * 3 + 0] = v1(0);
+        parameters[n * 3 + 1] = v1(1);
+        parameters[n * 3 + 2] = v1(2);
+        */
+
+    }
+
+    std::cout << "r0: " << path->poses[0].position.x << ", " << path->poses[0].position.y << ", " << path->poses[0].position.z << std::endl;
+
+    std::cout << "x0: " << path->poses[N].position.x << ", " << path->poses[N].position.y << ", " << path->poses[N].position.z << std::endl;
+
+    std::cout << "r0: " << v1(0) << ", " << v1(1) << ", " << v1(2) << std::endl;
+
     std::cout << "x0: ";
     for(int i = 0; i < n_st; i++){
         std::cout << x0[i] << ", ";
         if ((i + 1) % 3 == 0){std::cout << std::endl;}
     }
     std::cout << std::endl;
-
-    //double p_i[3] = {x0[0], x0[1], x0[2] + 1};
-    //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
-    //double p_i[3] = {0.5, -9.7, -0.78};
-    double p_i[3] = {-2, 1.65, 0.1 + 3};
-    // Getting the parameters (reference path) from the received message, and using them as equality constraints    
-    for (int n = 0; n < N; n++){
-        /*
-        parameters[n * 3 + 0] = path->poses[n].position.x;
-        parameters[n * 3 + 1] = path->poses[n].position.y;
-        parameters[n * 3 + 2] = path->poses[n].position.z;
-        */
-        parameters[n * 3 + 0] = p_i[0];
-        parameters[n * 3 + 1] = p_i[1];
-        parameters[n * 3 + 2] = p_i[2];
-
-    }
-
-    // Transforming the coords (rotation about z) to align it with the yaw (nessecary for the linear model to work)
     
     for(int i = 0; i < 3 * N; i++){
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
