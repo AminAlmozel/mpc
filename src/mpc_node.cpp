@@ -46,8 +46,8 @@ public:
         // TODO: give proper values for the boundaries
         // For the nonlinear model (motor values)
         /*
-        ulb0[n_con] = {0 - u_bar, 0, 0, 0};
-        uub0[n_con] = {1 - u_bar, 1, 1, 1};
+        ulb0[n_con] = {0, 0, 0, 0};
+        uub0[n_con] = {1, 1, 1, 1};
         */
 
         // For the linear model (Thrust, roll rate, pitch rate, yaw rate)
@@ -108,11 +108,11 @@ public:
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
 
-        //{1.65, 2, 0.04}
+        double r[] = {-2, 1.65, 0.1 + 10};
         for (int n = 0; n < N; n++){ // For each time step
-            temp[0] = x[n * n_st + 0] + 2;//p[n * 3 + 0];
-            temp[1] = x[n * n_st + 1] - 1.65;//p[n * 3 + 1];
-            temp[2] = x[n * n_st + 2] - 0.04 + 2;//p[n * 3 + 2];
+            temp[0] = x[n * n_st + 0] - r[0];//p[n * 3 + 0];
+            temp[1] = x[n * n_st + 1] - r[1];//p[n * 3 + 1];
+            temp[2] = x[n * n_st + 2] - r[2];//p[n * 3 + 2];
             // Quad part (in the form of xT*Q*x), 3 for x, y, z states
             for (int i = 0; i < 3; i++){ 
                 for (int j = 0; j < 3; j++){
@@ -507,12 +507,12 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         path->poses[N].position.x,
         path->poses[N].position.y,
         path->poses[N].position.z,
-        path->poses[N].orientation.x,
-        path->poses[N].orientation.y,
-        path->poses[N].orientation.z,
         path->poses[N+1].position.x,
         path->poses[N+1].position.y,
         path->poses[N+1].position.z,
+        path->poses[N].orientation.x,
+        path->poses[N].orientation.y,
+        path->poses[N].orientation.z,
         path->poses[N+1].orientation.x,
         path->poses[N+1].orientation.y,
         path->poses[N+1].orientation.z
@@ -528,7 +528,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     //double p_i[3] = {x0[0], x0[1], x0[2] + 1};
     //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
     //double p_i[3] = {0.5, -9.7, -0.78};
-    double p_i[3] = {-2, 1.65, 0.04 + 3};
+    double p_i[3] = {-2, 1.65, 0.1 + 3};
     // Getting the parameters (reference path) from the received message, and using them as equality constraints    
     for (int n = 0; n < N; n++){
         /*
@@ -543,28 +543,6 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     }
 
     // Transforming the coords (rotation about z) to align it with the yaw (nessecary for the linear model to work)
-    /*
-    // Setting the yaw to 0
-    double yaw = - x0[5];
-    x0[5] = 0;
-    double zrot[3][3] = 
-    {{cos(yaw), -sin(yaw), 0},
-    {sin(yaw), cos(yaw), 0},
-    {0, 0, 1}};
-
-    double temp[3] = {0, 0, 0};
-
-    for (int n = 0; n < N; n++){
-        for (int i = 0; i < 3; i++){
-            for( int j = 0; j < 3; j++){
-                temp[i] += zrot[i][j] * parameters[n * 3 + j];
-            }    
-        }
-        parameters[n * 3 + 0] = temp[0];
-        parameters[n * 3 + 1] = temp[1];
-        parameters[n * 3 + 2] = temp[2];
-    }
-    */
     
     for(int i = 0; i < 3 * N; i++){
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
@@ -575,12 +553,6 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     }
 
     model.update();
-    /*
-    for(int i = 0; i < 3 * N; i++){
-        std::cout << pHandle[i].get(GRB_DoubleAttr_RHS) << ", ";
-        if ((i + 1) % 3 == 0){ std::cout << std::endl; }
-    }
-    */
 
 
 /*
@@ -715,12 +687,13 @@ void mpc::pubCont() {
         std::cout << u[i* n_con + 0].get(GRB_DoubleAttr_X) << ", ";
         //if ((i + 1) % 3 == 0){std::cout << std::endl;}
     }
-    */
+
     std::cout << "p[i]: ";
     for(int i = 0; i < 3 * N; i++){
         std::cout << p[i].get(GRB_DoubleAttr_X) << ", ";
         if ((i + 1) % 3 == 0){std::cout << std::endl;}
     }
+    */
     geometry_msgs::Quaternion cont;
     double U[4] = {
     u[0].get(GRB_DoubleAttr_X), 
