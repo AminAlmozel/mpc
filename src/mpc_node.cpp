@@ -17,7 +17,7 @@
 //#include <valarray>
 using namespace std;
 
-#define N 20
+#define N 40
 
 #define f 20.0
 
@@ -32,14 +32,14 @@ public:
         pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
 
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
-        double rpAngle = 20 * M_PI / 180; // 20 degress
+        double rpAngle = 30 * M_PI / 180; // 20 degress
         double yAngle = 180 * M_PI / 180;
         double xlb0[n_st] = {-GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -rpAngle, -rpAngle, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY};
         double xub0[n_st] = {GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, rpAngle, rpAngle, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY};
 
         if (~linearModel){ u_bar = 0;}
         double rpb = 2.90; // Roll rate, pitch rate bound
-        rpb = 0.3; // To stay within the linear region
+        rpb = 100; // To stay within the linear region
         double yb = 3.793; // Yaw bound, through experimentation
         yb = 0.4;
 
@@ -656,20 +656,27 @@ void mpc::pubCont() {
     */
     geometry_msgs::Quaternion cont;
     try{
-        
+        /*
         double U[4] = {
         u[0].get(GRB_DoubleAttr_X), 
         u[1].get(GRB_DoubleAttr_X), 
         u[2].get(GRB_DoubleAttr_X), 
         u[3].get(GRB_DoubleAttr_X)};
+        */
         
         /*
         double U[4] = {
         u[0].get(GRB_DoubleAttr_X), // Throttle
+        x[n_st + 6].get(GRB_DoubleAttr_X) + u[1].get(GRB_DoubleAttr_X) * 1/f, // Roll
+        x[n_st + 7].get(GRB_DoubleAttr_X) + u[2].get(GRB_DoubleAttr_X) * 1/f, // Pitch
+        x[n_st + 8].get(GRB_DoubleAttr_X) + u[3].get(GRB_DoubleAttr_X) * 1/f}; // Yaw
+        */
+        double U[4] = {
+        u[0].get(GRB_DoubleAttr_X), // Throttle
         x[n_st + 6].get(GRB_DoubleAttr_X), // Roll
         x[n_st + 7].get(GRB_DoubleAttr_X), // Pitch
-        u[3].get(GRB_DoubleAttr_X)}; // Yaw rate
-        */
+        x[n_st + 8].get(GRB_DoubleAttr_X)}; // Yaw
+        
 
         // Getting the control input from the solution of the optimization problem
         if(linearModel){ // linearModel = 1 for the linear model
@@ -702,7 +709,7 @@ void mpc::pubCont() {
 
     pubControl.publish(cont);
 
-    ros::spinOnce();
+    //ros::spinOnce();
 }
 
 void mpc::pubTraj() {
