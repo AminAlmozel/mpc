@@ -19,7 +19,7 @@ using namespace std;
 
 #define N 20
 
-#define f 10.0
+#define f 20.0
 
 class mpc {
 public:
@@ -32,16 +32,16 @@ public:
         pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
 
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
-        double rpAngle = 30 * M_PI / 180; // 30 degress
-        double yAngle = 180 * M_PI / 180; // 30 degress
-        double xlb0[n_st] = {-GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY};
-        double xub0[n_st] = {GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY};
+        double rpAngle = 20 * M_PI / 180; // 20 degress
+        double yAngle = 180 * M_PI / 180;
+        double xlb0[n_st] = {-GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -rpAngle, -rpAngle, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY};
+        double xub0[n_st] = {GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, rpAngle, rpAngle, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY};
 
         if (~linearModel){ u_bar = 0;}
         double rpb = 2.90; // Roll rate, pitch rate bound
         rpb = 0.3; // To stay within the linear region
         double yb = 3.793; // Yaw bound, through experimentation
-        yb = 0.3;
+        yb = 0.4;
 
         // TODO: give proper values for the boundaries
         // For the nonlinear model (motor values)
@@ -59,6 +59,16 @@ public:
             xlb[i] = xlb0[ i % n_st ];
             xub[i] = xub0[ i % n_st ];
         }
+        // To impose no constraints on the initial state
+        xlb[6] = -GRB_INFINITY;
+        xlb[7] = -GRB_INFINITY;
+        xlb[6 + n_st] = -GRB_INFINITY;
+        xlb[7 + n_st] = -GRB_INFINITY;
+        xub[6] = GRB_INFINITY;
+        xub[7] = GRB_INFINITY;
+        xub[6 + n_st] = GRB_INFINITY;
+        xub[7 + n_st] = GRB_INFINITY;
+
 
         for (int i = 0; i < n_con * N; i++) {
             utype[i] = GRB_CONTINUOUS;
@@ -184,6 +194,23 @@ private:
     double dt = 1/f;
     const int64_t n_st = 12;
     const int64_t n_con = 4;
+
+    // Constants
+    double u_bar = 0.64; // From experimentation
+
+    double g = 9.81;
+    double m = 1; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
+    double l = 0.2275; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
+    //AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
+    //AirLib / include / vehicles / multirotor / MultiRotorParams.hpp
+    // and plugging the two links into matlab
+    double Ix = 0.0066;
+    double Iy = 0.0079;
+    double Iz = 0.0143;
+    double Jr = 6e-5;
+    double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+    double cQ = 1.3/4; // Drag coefficient, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
+
     GRBEnv* env = new GRBEnv();
     GRBModel model = GRBModel(*env);
 
@@ -221,8 +248,6 @@ private:
     GRBQConstr* colli_con = new GRBQConstr[N];
     GRBConstr* initial_st = new GRBConstr[n_st];
 
-
-
     bool firstIteration = 1;
     bool linearModel = 1; // 0 for nonlinear model
     double* parameters;
@@ -233,23 +258,6 @@ private:
     ros::Subscriber sub;
 
     geometry_msgs::PoseArray path;
-
-    // Constants
-    double g = 9.81;
-    double m = 1; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    double l = 0.2275; // Taken from AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    //AirLib / include / vehicles / multirotor / firmwares / mavlink / Px4MultiRotorParams.hpp
-    //AirLib / include / vehicles / multirotor / MultiRotorParams.hpp
-    // and plugging the two links into matlab
-    double Ix = 0.0066;
-    double Iy = 0.0079;
-    double Iz = 0.0143;
-    double Jr = 6e-5;
-    double cT = 4.179446268; // Max thrust taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
-    double cQ = 1.3/4; // Drag coefficient, taken from AirSim / blob / master / AirLib / include / vehicles / multirotor / RotorParams.hpp
-
-    double u_bar = 0.64; // From experimentation
-
 };
 
 void mpc::nlquadModel() {
@@ -501,36 +509,36 @@ void mpc::collision(mpc* opponent) {
 
 void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
-    // Assuming the initial state is 12 states that are appended as the last 2 poses in the path message
+    // Assuming the initial state is 12 states that are the first 2 poses in the path message
     double x0[n_st] = {
-        path->poses[N].position.x,
-        path->poses[N].position.y,
-        path->poses[N].position.z,
-        path->poses[N+1].position.x,
-        path->poses[N+1].position.y,
-        path->poses[N+1].position.z,
-        path->poses[N].orientation.x,
-        path->poses[N].orientation.y,
-        path->poses[N].orientation.z,
-        path->poses[N+1].orientation.x,
-        path->poses[N+1].orientation.y,
-        path->poses[N+1].orientation.z
+        path->poses[0].position.x,
+        path->poses[0].position.y,
+        path->poses[0].position.z,
+        path->poses[1].position.x,
+        path->poses[1].position.y,
+        path->poses[1].position.z,
+        path->poses[0].orientation.x,
+        path->poses[0].orientation.y,
+        path->poses[0].orientation.z,
+        path->poses[1].orientation.x,
+        path->poses[1].orientation.y,
+        path->poses[1].orientation.z
     };
 
     // Transforming the coords (rotation about z) to align it with the yaw (nessecary for the linear model to work)
     Eigen::Matrix3d rot;
     Eigen::Vector3d v1, v2;
-    rot = Eigen::AngleAxis<double>(-path->poses[N].orientation.z, Eigen::Vector3d::UnitZ());
+    rot = Eigen::AngleAxis<double>(-path->poses[0].orientation.z, Eigen::Vector3d::UnitZ());
 
     // Position
-    v1(0) = path->poses[N].position.x;
-    v1(1) = path->poses[N].position.y;
-    v1(2) = path->poses[N].position.z;
+    v1(0) = path->poses[0].position.x;
+    v1(1) = path->poses[0].position.y;
+    v1(2) = path->poses[0].position.z;
 
     // Velocity
-    v2(0) = path->poses[N+1].position.x;
-    v2(1) = path->poses[N+1].position.y;
-    v2(2) = path->poses[N+1].position.z;
+    v2(0) = path->poses[1].position.x;
+    v2(1) = path->poses[1].position.y;
+    v2(2) = path->poses[1].position.z;
     
     // Transforming the position and yaw of the initial state
     v1 = rot * v1; // Position
@@ -554,24 +562,26 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
     //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
     //double p_i[3] = {0.5, -9.7, -0.78};
-    double p_i[3] = {-2, 1.65, 0.1 + 10};
+    //double p_i[3] = {-2, 1.65, 0.1};
+    double p_i[3] = {10, 10, 10};
     // Getting the parameters (reference path) from the received message, and using them as equality constraints    
     for (int n = 0; n < N; n++){
-        
-        v1(0) = path->poses[n].position.x;
-        v1(1) = path->poses[n].position.y;
-        v1(2) = path->poses[n].position.z;
+        /*
+        // +2 Because the first two poses are the initial state
+        v1(0) = path->poses[n + 2].position.x;
+        v1(1) = path->poses[n + 2].position.y;
+        v1(2) = path->poses[n + 2].position.z;
+        */
+        v1(0) = p_i[0];
+        v1(1) = p_i[1];
+        v1(2) = p_i[2];
+
         v1 = rot * v1;
         
-        parameters[n * 3 + 0] = p_i[0];
-        parameters[n * 3 + 1] = p_i[1];
-        parameters[n * 3 + 2] = p_i[2];
-        /*
         parameters[n * 3 + 0] = v1(0);
         parameters[n * 3 + 1] = v1(1);
         parameters[n * 3 + 2] = v1(2);
-        */
-
+        
     }
 
     std::cout << "r0: " << path->poses[0].position.x << ", " << path->poses[0].position.y << ", " << path->poses[0].position.z << std::endl;
@@ -597,100 +607,6 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
 
     model.update();
 
-
-/*
-    if(linearModel){ // 1 for linear model
-        double A[12][12] = { // Make sure of the g's, now x. is g*pitch, y. is -g*roll
-            {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 0, 0, g, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 0, -g, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
-
-        double B[12][4] = {
-            {0, 0, 0, 0},
-            {0, 0, 0, 0},
-            {0, 0, 0, 0},
-            {0, 0, 0, 0},
-            {0, 0, 0, 0},
-            {1/m, 0, 0, 0},
-            {0, 0, 0, 0},
-            {0, 0, 0, 0},
-            {0, 0, 0, 0},
-            {0, l/Ix, 0, 0},
-            {0, 0, l/Iy, 0},
-            {0, 0, 0, l/Iz} };
-        // Adding the new ones
-        GRBLinExpr dx = 0;
-        for (int i = 0; i < mpc::n_st; i++) {
-            int n = 0;
-            dx = 0;
-            for (int j = 0; j < mpc::n_st; j++) {
-                if (A[i][j] != 0)
-                    dx += A[i][j] * x0[j];
-            }
-            for (int k = 0; k < mpc::n_con; k++) {
-                if (B[i][k] != 0)
-                    dx += B[i][k] * mpc::u[k];
-            }
-
-
-            // x_t+1 = x_t + (A*x_t + B*u_t) * dt
-            //          x_t + (A*x_t + B*u_t) * dt - x_t+1 == 0
-            initial_st[i] = mpc::model.addQConstr(x0[i] + dx * mpc::dt - mpc::x[0 * n_st + i]  == 0);
-
-        }
-
-    }
-    else{ // For nonlinear model
-        int n = 0;
-        GRBQuadExpr xdot[12] = 0;
-        //xd
-        xdot[0] = x0[n * n_st + 3];
-        // yd
-        xdot[1] = x0[n * n_st + 4];
-        // zd
-        xdot[2] = x0[n * n_st + 5];
-        // xdd, horizontal
-        xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * cos(x0[n * n_st + 8]) + sin(x0[n * n_st + 6]) * sin(x0[n * n_st + 8]));
-        //xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
-        // ydd, horizontal
-        xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * sin(x0[n * n_st + 7]) * sin(x0[n * n_st + 8]) - sin(x0[n * n_st + 6]) * cos(x0[n * n_st + 8]));
-        //xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s8c8[n]);
-        // MAKE SURE OF THE - g
-        // zdd, height
-        xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x0[n * n_st + 6]) * cos(x0[n * n_st + 7])) - g;
-        //xdotQuad[2] = cT * T[n] / m * c6c7[n] - g;
-        // Rolld, phi
-        xdot[6] = x0[n * n_st + 9];
-        // Pitchd, theta
-        xdot[7] = x0[n * n_st + 10];
-        // Yawd, psi
-        xdot[8] = x0[n * n_st + 11];
-        // Rolldd, phi
-        xdot[9] = (Iy - Iz) / Ix * x0[n * n_st + 10] * x0[n * n_st + 11] + cT * l * (u[n * n_con + 3] * u[n * n_con + 3] - u[n * n_con + 1] * u[n * n_con + 1]) / Ix;
-        // Pitchdd, theta
-        xdot[10] = (Iz - Ix) / Iy * x0[n * n_st + 9] * x0[n * n_st + 11] + cT * l * (u[n * n_con + 2] * u[n * n_con + 2] - u[n * n_con + 0] * u[n * n_con + 0]) / Iy;
-        // Yawdd, psi
-        xdot[11] = (Ix - Iy) / Iz * x0[n * n_st + 9] * x0[n * n_st + 10] + cQ * (-u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] - u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / Iz;
-
-        // Adding linear constraints
-        for(int i = 0; i < n_st; i++){
-            GRBQuadExpr modelConstraint = 0;
-            // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x0[i] + xdot[i] * dt - x[i];
-            initial_st[i] = mpc::model.addQConstr(modelConstraint == 0);
-        }
-    }
-    */
-
     // Adding the collision constraints to the optimization problem
     //collision(opponent);
     try{
@@ -701,6 +617,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         model.update();
         //model.reset(0);
         model.optimize();
+        u[0].get(GRB_DoubleAttr_X);
     }
     catch (GRBException e)
     {
@@ -738,25 +655,50 @@ void mpc::pubCont() {
     }
     */
     geometry_msgs::Quaternion cont;
-    double U[4] = {
-    u[0].get(GRB_DoubleAttr_X), 
-    u[1].get(GRB_DoubleAttr_X), 
-    u[2].get(GRB_DoubleAttr_X), 
-    u[3].get(GRB_DoubleAttr_X)};
+    try{
+        
+        double U[4] = {
+        u[0].get(GRB_DoubleAttr_X), 
+        u[1].get(GRB_DoubleAttr_X), 
+        u[2].get(GRB_DoubleAttr_X), 
+        u[3].get(GRB_DoubleAttr_X)};
+        
+        /*
+        double U[4] = {
+        u[0].get(GRB_DoubleAttr_X), // Throttle
+        x[n_st + 6].get(GRB_DoubleAttr_X), // Roll
+        x[n_st + 7].get(GRB_DoubleAttr_X), // Pitch
+        u[3].get(GRB_DoubleAttr_X)}; // Yaw rate
+        */
 
-    // Getting the control input from the solution of the optimization problem
-    if(linearModel){ // linearModel = 1 for the linear model
-        cont.x = U[0] + u_bar;
+        // Getting the control input from the solution of the optimization problem
+        if(linearModel){ // linearModel = 1 for the linear model
+            cont.x = U[0] + u_bar;
+            cont.y = U[1];
+            cont.z = U[2];
+            cont.w = U[3];
+        }
+        else{
+            cont.x = cT * (U[0] * U[0] + U[1] * U[1] + U[2] * U[2] + U[3] * U[3]);
+            cont.y = cT * l * (- U[1] * U[1] + U[3] * U[3]);
+            cont.z = cT * l * (- U[0] * U[0] + U[2] * U[2]);
+            cont.w = cT * l * (- U[0] * U[0] + U[1] * U[1] - U[2] * U[2] + U[3] * U[3]);
+        }
+    }
+    catch (GRBException e)
+    {
+        double U[4] = {u_bar, 0, 0, 0};
+        cont.x = U[0];
         cont.y = U[1];
         cont.z = U[2];
         cont.w = U[3];
+
     }
-    else{
-        cont.x = cT * (U[0] * U[0] + U[1] * U[1] + U[2] * U[2] + U[3] * U[3]);
-        cont.y = cT * l * (- U[1] * U[1] + U[3] * U[3]);
-        cont.z = cT * l * (- U[0] * U[0] + U[2] * U[2]);
-        cont.w = cT * l * (- U[0] * U[0] + U[1] * U[1] - U[2] * U[2] + U[3] * U[3]);
+    catch (...)
+    {
+        cout << "Error during optimization" << endl;
     }
+
 
     pubControl.publish(cont);
 
