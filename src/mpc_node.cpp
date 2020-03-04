@@ -32,14 +32,14 @@ public:
         pubTrajectory = node->advertise<geometry_msgs::PoseArray>("mpc_trajectory", 2);
 
         // Setting up the variable type (continuous, integer, ...) and the variable constraints
-        double rpAngle = 30 * M_PI / 180; // 20 degress
+        double rpAngle = 20 * M_PI / 180; // 20 degress
         double yAngle = 180 * M_PI / 180;
         double xlb0[n_st] = {-GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -rpAngle, -rpAngle, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY, -GRB_INFINITY};
         double xub0[n_st] = {GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, rpAngle, rpAngle, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY, GRB_INFINITY};
 
         if (~linearModel){ u_bar = 0;}
         double rpb = 2.90; // Roll rate, pitch rate bound
-        rpb = 100; // To stay within the linear region
+        rpb = 0.4; // To stay within the linear region
         double yb = 3.793; // Yaw bound, through experimentation
         yb = 0.4;
 
@@ -118,7 +118,6 @@ public:
         // Constructing the objective
         // (x[n * n_st + i] - path.poses[i].pose.x)*Q[i*cols+j]*(x[j * n_st + 0] - path.poses[j].pose.x)
 
-        double r[] = {-2, 1.65, 0.1 + 10};
         for (int n = 0; n < N; n++){ // For each time step
             temp[0] = x[n * n_st + 0] - p[n * 3 + 0];
             temp[1] = x[n * n_st + 1] - p[n * 3 + 1];
@@ -132,8 +131,6 @@ public:
                 }
             }
         }
-
-        // Constructing the objective
         
         // uT*R*u
         for (int n = 0; n < N; n++){ // For each time step
@@ -563,7 +560,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
     //double p_i[3] = {0.5, -9.7, -0.78};
     //double p_i[3] = {-2, 1.65, 0.1};
-    double p_i[3] = {10, 10, 10};
+    double p_i[3] = {0, 3, 10};
     // Getting the parameters (reference path) from the received message, and using them as equality constraints    
     for (int n = 0; n < N; n++){
         /*
@@ -584,13 +581,13 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
         
     }
 
-    std::cout << "r0: " << path->poses[0].position.x << ", " << path->poses[0].position.y << ", " << path->poses[0].position.z << std::endl;
+    std::cout << "x0: " << path->poses[0].position.x << ", " << path->poses[0].position.y << ", " << path->poses[0].position.z << std::endl;
 
-    std::cout << "x0: " << path->poses[N].position.x << ", " << path->poses[N].position.y << ", " << path->poses[N].position.z << std::endl;
+    std::cout << "r0: " << path->poses[N].position.x << ", " << path->poses[N].position.y << ", " << path->poses[N].position.z << std::endl;
 
-    std::cout << "r0: " << v1(0) << ", " << v1(1) << ", " << v1(2) << std::endl;
+    std::cout << "Transformed r0: " << v1(0) << ", " << v1(1) << ", " << v1(2) << std::endl;
 
-    std::cout << "x0: ";
+    std::cout << "Transformed x0: ";
     for(int i = 0; i < n_st; i++){
         std::cout << x0[i] << ", ";
         if ((i + 1) % 3 == 0){std::cout << std::endl;}
@@ -608,6 +605,7 @@ void mpc::mpcSetup(const geometry_msgs::PoseArray::ConstPtr& path){
     model.update();
 
     // Adding the collision constraints to the optimization problem
+    // Consider adding the collisions as lazy constraints
     //collision(opponent);
     try{
 
@@ -671,11 +669,13 @@ void mpc::pubCont() {
         x[n_st + 7].get(GRB_DoubleAttr_X) + u[2].get(GRB_DoubleAttr_X) * 1/f, // Pitch
         x[n_st + 8].get(GRB_DoubleAttr_X) + u[3].get(GRB_DoubleAttr_X) * 1/f}; // Yaw
         */
+        
         double U[4] = {
         u[0].get(GRB_DoubleAttr_X), // Throttle
         x[n_st + 6].get(GRB_DoubleAttr_X), // Roll
         x[n_st + 7].get(GRB_DoubleAttr_X), // Pitch
         x[n_st + 8].get(GRB_DoubleAttr_X)}; // Yaw
+        
         
 
         // Getting the control input from the solution of the optimization problem
