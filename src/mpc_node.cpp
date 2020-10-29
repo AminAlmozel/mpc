@@ -32,7 +32,7 @@ public:
         //sub = node->subscribe("gtp", 1, &mpc::mpcCallback, this);
         sub_gtp = node->subscribe("gtp", 1, &mpc::callback, this);
         pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
-        pubTrajectory = node->advertise<geometry_msgs::PoseArray>("gtp", 2);
+        //pubTrajectory = node->advertise<geometry_msgs::PoseArray>("gtp", 2);
         
         double llb = 0;
         double lub = 1;
@@ -194,7 +194,7 @@ public:
     void state_transition_constraints(); // Linear model
     void collision(mpc* opponent); // Initializing collision constraints
     void set_initial_state(const geometry_msgs::PoseArray::ConstPtr& path);
-    void mpc_setup() const;
+    void set_reference_trajectory(const geometry_msgs::PoseArray::ConstPtr& path);
     void solveMPC();
     void pubTraj();
     void pub_cont();
@@ -211,6 +211,8 @@ public:
 
     double x0[n_st];
     double u0[N][n_con];
+    ros::Publisher pubControl;
+
 
 private:
     // Class attributes
@@ -292,7 +294,6 @@ private:
 
     ros::NodeHandle* n;
     
-    ros::Publisher pubControl;
     ros::Publisher pubTrajectory;
     ros::Subscriber sub_gtp;
 
@@ -902,167 +903,50 @@ void mpc::solveMPC() {
     }
 }
 
-void mpc::mpc_setup() const {
+void mpc::set_reference_trajectory(const geometry_msgs::PoseArray::ConstPtr& path) {
 
-    // Assuming the initial state is 12 states that are the first 2 poses in the path message
-    /* // Change this to path_msg instead of path
-    double x0[n_st] = {
-        path->poses[0].position.x,
-        path->poses[0].position.y,
-        path->poses[0].position.z,
-        path->poses[1].position.x,
-        path->poses[1].position.y,
-        path->poses[1].position.z,
-        path->poses[0].orientation.x,
-        path->poses[0].orientation.y,
-        path->poses[0].orientation.z,
-        path->poses[1].orientation.x,
-        path->poses[1].orientation.y,
-        path->poses[1].orientation.z
-    };
-    */
-
-    // Transforming the position of the gates
+    // int index = 0;
+    // double dist[3];
+    // double min = 1e5;
+    // double sum;
+    // // Finding the point closest to the initial position
+    // for (int i = 0; i < path_len / 3; i++) {
+    //     dist[0] = path[3 * i + 0] - x0[0];
+    //     dist[1] = path[3 * i + 1] - x0[1];
+    //     dist[2] = path[3 * i + 2] - x0[2];
+    //     sum = dist[0] * dist[0] + dist[1] * dist[1] + dist[2] * dist[2];
+    //     if (sum < min) {
+    //         min = sum;
+    //         index = i;
+    //     }
+    // }
+    // index++;
+    //cout << index << endl;
 
     //std::cout << "Reference: " << p_i[0] << ", " << p_i[1] << ", " << p_i[2] << std::endl;
     //double p_i[3] = {0.5, -9.7, -0.78};
     //double p_i[3] = {-2, 1.65, 0.1};
     //double p_i[3] = { 0, 3, 10 };
     double p_i[3] = { 1.1, 0, 1 };
-
-    int index = 0;
-    double dist[3];
-    double min = 1e5;
-    double sum;
-    // Finding the point closest to the initial position
-    for (int i = 0; i < path_len / 3; i++) {
-        dist[0] = path[3 * i + 0] - x0[0];
-        dist[1] = path[3 * i + 1] - x0[1];
-        dist[2] = path[3 * i + 2] - x0[2];
-        sum = dist[0] * dist[0] + dist[1] * dist[1] + dist[2] * dist[2];
-        if (sum < min) {
-            min = sum;
-            index = i;
-        }
-    }
-    index++;
-    //cout << index << endl;
     // Getting the parameters (reference path) from the received message, and using them as equality constraints    
     for (int n = 0; n < N; n++) {
-        /*
+        // parameters[n * 3 + 0] = path[(3 * (n + index) + 0) % path_len];
+        // parameters[n * 3 + 1] = path[(3 * (n + index) + 1) % path_len];
+        // parameters[n * 3 + 2] = path[(3 * (n + index) + 2) % path_len];
+
+        // parameters[n * 3 + 0] = p_i[0];
+        // parameters[n * 3 + 1] = p_i[1];
+        // parameters[n * 3 + 2] = p_i[2];
+
         // +2 Because the first two poses are the initial state
-        v1(0) = path->poses[n + 2].position.x;
-        v1(1) = path->poses[n + 2].position.y;
-        v1(2) = path->poses[n + 2].position.z;
-        */
-        /*
-        v1(0) = p_i[0];
-        v1(1) = p_i[1];
-        v1(2) = p_i[2];
-        */
-
-        //v1 = rot * v1;
-
-        //parameters[n * 3 + 0] = p_i[0];
-        //parameters[n * 3 + 1] = p_i[1];
-        //parameters[n * 3 + 2] = p_i[2];
-
-        parameters[n * 3 + 0] = path[(3 * (n + index) + 0) % path_len];
-        parameters[n * 3 + 1] = path[(3 * (n + index) + 1) % path_len];
-        parameters[n * 3 + 2] = path[(3 * (n + index) + 2) % path_len];
+        parameters[n * 3 + 0] = path->poses[n + 2].position.x;
+        parameters[n * 3 + 1] = path->poses[n + 2].position.y;
+        parameters[n * 3 + 2] = path->poses[n + 2].position.z;
     }
 
     for (int i = 0; i < 3 * N; i++) {
         pHandle[i].set(GRB_DoubleAttr_RHS, parameters[i]);
     }
-
-    for (int i = 0; i < n_st; i++) {
-        initial_st[i].set(GRB_DoubleAttr_RHS, x0[i]);
-    }
-}
-
-void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
-    ROS_INFO_STREAM("Recieved Pose Array!");
-    int L = 15;
-    // TODO: Add collision constraints
-    //collision(); // Adding collision constraints
-    set_initial_state(path);
-    mpc_setup();
-    converged = false;
-    if (soft_constraint) {
-        //remove_soft_constraint();
-    }
-
-    for (int i = 0; i < L; i++) {
-        // Solve the problem with the given path, then take the solution, and store the control inputs
-        solveMPC();
-        // Update the state transition constraints by generating A and B matricies around the new trajectory
-        state_transition_constraints();
-        if (converged == true) {
-            //break;
-        }
-    }
-
-    pub_cont();
-    //pubTraj();
-
-    if (nn > 13){
-        return;
-    }
-    double xi[n_st] = { 0, -3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; // Will hold the current state
-    double x_next[n_st];
-    double ui[n_con]; // Will hold the current input
-    for (int i = 0; i < n_st; i++) {
-        xi[i] = x0[i]; // Setting the current state to be the initial state
-    }
-    cout << "u[" << nn << "]:";
-    for (int i = 0; i < n_con; i++) {
-        ui[i] = u0[0][i];
-        cout << ui[i] << ", ";
-    }
-    cout << endl;
-    nl_model(xi, ui, x_next); // Use the nonlinear model to get the next state using the current state and input
-    cout << "x[" << nn + 1 << "]:";
-    for (int i = 0; i < n_st; i++) {
-        cout << x_next[i] << ", ";
-    }
-    cout << endl;
-    for (int i = 0; i < n_st; i++) {
-        xi[i] = x_next[i];
-    }
-    nn++;
-
-    //ros::Publisher pt = n->advertise<geometry_msgs::PoseArray>("gtp", 2);
-    cout << "HERE" << endl;
-
-    // Input a list of pose messages as a pointer
-    geometry_msgs::PoseArray p;
-    geometry_msgs::Pose pos;
-
-    // Save ego trajectory in p
-
-    // position and orientation
-    pos.position.x = xi[0];
-    pos.position.y = xi[1];
-    pos.position.z = xi[2];
-    pos.orientation.x = xi[6];
-    pos.orientation.y = xi[7];
-    pos.orientation.z = xi[8];
-    p.poses.push_back(pos);
-
-    // Linear and angular velocity
-    pos.position.x = xi[3];
-    pos.position.y = xi[4];
-    pos.position.z = xi[5];
-    pos.orientation.x = xi[9];
-    pos.orientation.y = xi[10];
-    pos.orientation.z = xi[11];
-    p.poses.push_back(pos);
-
-    std::string frame_id = "world";
-    p.header.frame_id = frame_id;
-    pubTrajectory.publish(p);
-
 }
 
 void mpc::set_initial_state(const geometry_msgs::PoseArray::ConstPtr& path) {
@@ -1083,6 +967,48 @@ void mpc::set_initial_state(const geometry_msgs::PoseArray::ConstPtr& path) {
     for (int i = 0; i < n_st; i++) {
         mpc::x0[i] = x0[i];
     }
+    for (int i = 0; i < n_st; i++) {
+        initial_st[i].set(GRB_DoubleAttr_RHS, x0[i]);
+    }
+}
+
+void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
+    //ROS_INFO_STREAM("Recieved Pose Array!");
+    int L = 15;
+    // TODO: Add collision constraints
+    //collision(); // Adding collision constraints
+    set_initial_state(path);
+    set_reference_trajectory(path);
+    converged = false;
+    if (soft_constraint) {
+        //remove_soft_constraint();
+    }
+
+    for (int i = 0; i < L; i++) {
+        // Solve the problem with the given path, then take the solution, and store the control inputs
+        solveMPC();
+        // Update the state transition constraints by generating A and B matricies around the new trajectory
+        state_transition_constraints();
+        if (converged == true) {
+            //break;
+        }
+    }
+
+    pub_cont();
+    //pubTraj();
+
+    // Printing
+    std::cout << "x[" << nn  << "]:";
+    for (int i = 0; i < n_st; i++) {
+        std::cout << x0[i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "u[" << nn << "]:";
+    for (int i = 0; i < n_con; i++) {
+        std::cout << u0[0][i] << ", ";
+    }
+    std::cout << std::endl;
+    nn++;
 }
 
 int main(int argc, char* argv[]) {
@@ -1091,202 +1017,23 @@ int main(int argc, char* argv[]) {
 
     mpc ego = mpc(&n);
 
-    //const geometry_msgs::PoseArray::ConstPtr& path;
-    //geometry_msgs::PoseArray::ConstPtr& path = geometry_msgs::PoseArray;
-    double xi[n_st] = { 0, -3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; // Will hold the current state
-    double x_next[n_st];
-    double ui[n_con]; // Will hold the current input
+    geometry_msgs::Quaternion cont;
+    double U[4] = {
+        0.64,
+        0,
+        0,
+        0
+    };
+    
+    // Filling up the message
+    cont.x = U[0];
+    cont.y = U[1];
+    cont.z = U[2];
+    cont.w = U[3];
+    ros::Duration(1.0).sleep();
+    ego.pubControl.publish(cont);
 
-    // Making a test publisher and path message
-
-    ros::Publisher pubTrajectory = n.advertise<geometry_msgs::PoseArray>("gtp", 2);
-
-    // Input a list of pose messages as a pointer
-    geometry_msgs::PoseArray p;
-    geometry_msgs::Pose pos;
-
-    // Save ego trajectory in p
-
-    // position and orientation
-    pos.position.x = xi[0];
-    pos.position.y = xi[1];
-    pos.position.z = xi[2];
-    pos.orientation.x = xi[6];
-    pos.orientation.y = xi[7];
-    pos.orientation.z = xi[8];
-    p.poses.push_back(pos);
-
-    // Linear and angular velocity
-    pos.position.x = xi[3];
-    pos.position.y = xi[4];
-    pos.position.z = xi[5];
-    pos.orientation.x = xi[9];
-    pos.orientation.y = xi[10];
-    pos.orientation.z = xi[11];
-    p.poses.push_back(pos);
-
-    std::string frame_id = "world";
-    p.header.frame_id = frame_id;
-    int a;
-    //std::cin >> a;
-    pubTrajectory.publish(p);
-
-    //ros::spinOnce();
-
-
-
+    //x[20]:1.02383, 0.23585, 1.00095, 0.184719, -0.518006, 0.0487062, -0.0657238, 0.122437, 4.93842, 0.69976, -0.700007, 2.80343,
     ros::spin();
     return 0;
 }
-
-
-
-    // For testing
-    // const int L = 14;
-    // ofstream myfile;
-    // myfile.open("mpc_output.txt");
-    // myfile.close();
-    // double p[L][3];
-    /*
-    ego.set_initial_state(xi);
-
-    cout << "x[" << 0 << "]:";
-    for (int i = 0; i < n_st; i++) {
-        cout << xi[i] << ", ";
-    }
-    cout << endl;
-
-    for (int n = 0; n < L; n++) {
-        ego.callback();
-
-        for (int i = 0; i < n_st; i++) {
-            xi[i] = ego.x0[i]; // Setting the current state to be the initial state
-        }
-        cout << "u[" << n << "]:";
-        for (int i = 0; i < n_con; i++) {
-            ui[i] = ego.u0[0][i];
-            cout << ui[i] << ", ";
-        }
-        cout << endl;
-        ego.nl_model(xi, ui, x_next); // Use the nonlinear model to get the next state using the current state and input
-        cout << "x[" << n + 1 << "]:";
-        for (int i = 0; i < n_st; i++) {
-            cout << x_next[i] << ", ";
-        }
-        cout << endl;
-        for (int i = 0; i < n_st; i++) {
-            xi[i] = x_next[i];
-        }
-        ego.set_initial_state(xi);
-        for (int i = 0; i < 3; i++) {
-            p[n][i] = xi[i];
-        }
-    }
-
-    //ofstream myfile;
-    myfile.open("mpc_output.txt", std::ios_base::app);
-    for (int i = 0; i < 3; i++) {
-        for (int n = 0; n < L; n++) {
-            myfile << p[n][i] << " ";
-        }
-        myfile << endl;
-    }
-    myfile.close();
-    */
-
-//double xi[n_st]; // Will hold the current state
-//double x_next[n_st];
-//double ui[n_con]; // Will hold the current input
-
-//for (int i = 0; i < n_st; i++) {
-//    xi[i] = x0[i]; // Setting the current state to be the initial state
-//}
-//for (int n = 0; n < N; n++) {
-//    cout << "x[" << n << "]:";
-//    for (int i = 0; i < n_con; i++) {
-//        ui[i] = u0[n][i];
-//    }
-//    nl_model(xi, ui, x_next); // Use the nonlinear model to get the next state using the current state and input
-//    for (int i = 0; i < n_st; i++) {
-//        cout << x_next[i] << ',';
-//    }
-//    cout << endl;
-//    for (int i = 0; i < n_st; i++) {
-//        xi[i] = x_next[i];
-//    }
-//}
-
-/*
-void mpc::nlquadModel() {
-    ROS_WARN_STREAM("Using the nonlinear model!");
-    // INCOMPELETE
-    linearModel = 0;
-    //GRBQuadExpr xdot[3] = 0;
-    GRBLinExpr xdotLin[6] = 0;
-    GRBQuadExpr xdotQuad[6] = 0;
-
-    // u_bar is used for the linear model, so setting it to 0 here if the non linear model is used
-    u_bar = 0;
-
-    // Constants are defined as private class attributes
-
-    // Change the lower bound, upper bound, and type
-    // Working around the nonlinearities by defining new variables
-
-
-
-    for (int n = 0; n < N - 1; n++) { // The last time step is constraint to the time step before it
-        //xd
-        xdotLin[0] = x[n * n_st + 3];
-        // yd
-        xdotLin[1] = x[n * n_st + 4];
-        // zd
-        xdotLin[2] = x[n * n_st + 5];
-        // xdd, horizontal
-        //xdot[3] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * cos(x[n * n_st + 8]) + sin(x[n * n_st + 6]) * sin(x[n * n_st + 8]));
-        xdotQuad[0] = cT * T[n] / m * (c6s7c8[n] + s6s8[n]);
-        // ydd, horizontal
-        //xdot[4] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * sin(x[n * n_st + 7]) * sin(x[n * n_st + 8]) - sin(x[n * n_st + 6]) * cos(x[n * n_st + 8]));
-        xdotQuad[1] = cT * T[n] / m * (c6s7s8[n] + s6c8[n]);
-        // MAKE SURE OF THE - g
-        // zdd, height
-        //xdot[5] = (cT * (u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] + u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / m) * (cos(x[n * n_st + 6]) * cos(x[n * n_st + 7])) - g;
-        xdotQuad[2] = cT * T[n] / m * c6c7[n] - g;
-        // Rolld, phi
-        xdotLin[3] = x[n * n_st + 9];
-        // Pitchd, theta
-        xdotLin[4] = x[n * n_st + 10];
-        // Yawd, psi
-        xdotLin[5] = x[n * n_st + 11];
-        // Rolldd, phi
-        xdotQuad[3] = (Iy - Iz) / Ix * x[n * n_st + 10] * x[n * n_st + 11] + cT * l * (u[n * n_con + 3] * u[n * n_con + 3] - u[n * n_con + 1] * u[n * n_con + 1]) / Ix;
-        // Pitchdd, theta
-        xdotQuad[4] = (Iz - Ix) / Iy * x[n * n_st + 9] * x[n * n_st + 11] + cT * l * (u[n * n_con + 2] * u[n * n_con + 2] - u[n * n_con + 0] * u[n * n_con + 0]) / Iy;
-        // Yawdd, psi
-        xdotQuad[5] = (Ix - Iy) / Iz * x[n * n_st + 9] * x[n * n_st + 10] + cQ * (-u[n * n_con + 0] * u[n * n_con + 0] + u[n * n_con + 1] * u[n * n_con + 1] - u[n * n_con + 2] * u[n * n_con + 2] + u[n * n_con + 3] * u[n * n_con + 3]) / Iz;
-
-        int k = 0;
-        // Adding linear constraints
-        for (int i = 0; i < 6; i++) {
-            GRBLinExpr modelConstraint = 0;
-            if (i > 2) { k = 3; } // To match the order of the states and xdot, matching states 0, 1, 2, 6, 7, 8
-            // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i + k] + xdotLin[i] * dt - x[(n + 1) * n_st + i + k];
-            mpc::model.addConstr(modelConstraint == 0);
-        }
-
-        k = 3;
-        // Adding quadractic constraints
-        for (int i = 0; i < 6; i++) {
-            GRBQuadExpr modelConstraint = 0;
-            if (i > 2) { k = 6; } // To match the order of the states and xdot, matching states 3, 4, 5, 9, 10, 11
-            // x(t+1) = x(t) + xdot*dt
-            modelConstraint = x[n * n_st + i + k] + xdotQuad[i] * dt - x[(n + 1) * n_st + i + k];
-            mpc::model.addQConstr(modelConstraint == 0);
-        }
-
-    }
-
-}
-*/
-
