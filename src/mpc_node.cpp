@@ -998,6 +998,7 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
     //pubTraj();
 
     // Printing
+
     std::cout << "x[" << nn  << "]:";
     for (int i = 0; i < n_st; i++) {
         std::cout << x0[i] << ", ";
@@ -1006,6 +1007,11 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
     std::cout << "u[" << nn << "]:";
     for (int i = 0; i < n_con; i++) {
         std::cout << u0[0][i] << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "r[" << nn  << "]:";
+    for (int i = 0; i < 3; i++) {
+        std::cout << parameters[i] << ", ";
     }
     std::cout << std::endl;
     nn++;
