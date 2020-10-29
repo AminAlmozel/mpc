@@ -1009,7 +1009,7 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
         std::cout << u0[0][i] << ", ";
     }
     std::cout << std::endl;
-    std::cout << "r[" << nn  << "]:";
+    std::cout << "r[" << nn + 1  << "]:";
     for (int i = 0; i < 3; i++) {
         std::cout << parameters[i] << ", ";
     }
