@@ -23,16 +23,12 @@ using namespace std;
 
 class mpc {
 public:
-    mpc(ros::NodeHandle* node) {
+    mpc(ros::NodeHandle& node, string name) {
         model.set(GRB_IntParam_OutputFlag, 0);
         model.update();
         
-        Eigen::Matrix<GRBVar, 4, 4> test;
-
-        //sub = node->subscribe("gtp", 1, &mpc::mpcCallback, this);
-        sub_gtp = node->subscribe("gtp", 1, &mpc::callback, this);
-        pubControl = node->advertise<geometry_msgs::Quaternion>("control", 2);
-        //pubTrajectory = node->advertise<geometry_msgs::PoseArray>("gtp", 2);
+        sub_to_gtp = node.subscribe(name + "/gtp", 1, &mpc::callback, this);
+        pub_to_cont = node.advertise<geometry_msgs::Quaternion>(name + "/control", 2);
         
         double llb = 0;
         double lub = 1;
@@ -196,7 +192,7 @@ public:
     void set_initial_state(const geometry_msgs::PoseArray::ConstPtr& path);
     void set_reference_trajectory(const geometry_msgs::PoseArray::ConstPtr& path);
     void solveMPC();
-    void pubTraj();
+    void pub_traj();
     void pub_cont();
     void linearize_trajectory(double* x0, const double* u0);
     void linearize_point(int n, double* x0, const double* u0);
@@ -211,8 +207,7 @@ public:
 
     double x0[n_st];
     double u0[N][n_con];
-    ros::Publisher pubControl;
-
+    ros::Publisher pub_to_cont;
 
 private:
     // Class attributes
@@ -295,7 +290,7 @@ private:
     ros::NodeHandle* n;
     
     ros::Publisher pubTrajectory;
-    ros::Subscriber sub_gtp;
+    ros::Subscriber sub_to_gtp;
 
     geometry_msgs::PoseArray path_msg;
     int nn = 0;
@@ -506,12 +501,12 @@ void mpc::pub_cont() {
     }
 
     // Publishing the message
-    pubControl.publish(cont);
+    pub_to_cont.publish(cont);
 
     ros::spinOnce();
 }
 
-void mpc::pubTraj() {
+void mpc::pub_traj() {
     /*
     // Input a list of pose messages as a pointer
     geometry_msgs::PoseArray p;
@@ -1020,8 +1015,9 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
 int main(int argc, char* argv[]) {
     ros::init(argc, argv, "mpc");
     ros::NodeHandle n;
+    string drone_1 = "drone_1";
 
-    mpc ego = mpc(&n);
+    mpc ego = mpc(n, drone_1);
 
     geometry_msgs::Quaternion cont;
     double U[4] = {
@@ -1037,7 +1033,7 @@ int main(int argc, char* argv[]) {
     cont.z = U[2];
     cont.w = U[3];
     ros::Duration(1.0).sleep();
-    ego.pubControl.publish(cont);
+    ego.pub_to_cont.publish(cont);
 
     //x[20]:1.02383, 0.23585, 1.00095, 0.184719, -0.518006, 0.0487062, -0.0657238, 0.122437, 4.93842, 0.69976, -0.700007, 2.80343,
     ros::spin();
