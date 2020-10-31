@@ -868,7 +868,6 @@ void mpc::solveMPC() {
         for (int n = 0; n < N; n++) {
             for (int i = 0; i < n_con; i++) {
                 temp_u = u[n * n_con + i].get(GRB_DoubleAttr_X);
-                // Consider making a univariate optimization in c to converge faster
                 //double c = 0.1;
                 temp = temp_u - u0[n][i];
                 norm += temp * temp;
@@ -1013,11 +1012,14 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
 }
 
 int main(int argc, char* argv[]) {
-    ros::init(argc, argv, "mpc");
+    string drone_name = "drone_1";
+    if (argc > 1) {
+        drone_name = argv[1];
+    }
+    ros::init(argc, argv, "mpc" + drone_name);
     ros::NodeHandle n;
-    string drone_1 = "drone_1";
 
-    mpc ego = mpc(n, drone_1);
+    mpc ego = mpc(n, drone_name);
 
     geometry_msgs::Quaternion cont;
     double U[4] = {
