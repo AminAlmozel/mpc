@@ -29,6 +29,7 @@ public:
         
         sub_to_gtp = node.subscribe(name + "/gtp", 1, &mpc::callback, this);
         pub_to_cont = node.advertise<geometry_msgs::Quaternion>(name + "/control", 2);
+        pub_to_rviz = node.advertise<geometry_msgs::PoseArray>(name + "/mpc_rviz", 2);
         
         double llb = 0;
         double lub = 1;
@@ -208,6 +209,7 @@ public:
     double x0[n_st];
     double u0[N][n_con];
     ros::Publisher pub_to_cont;
+    ros::Publisher pub_to_rviz;
 
 private:
     // Class attributes
@@ -507,16 +509,16 @@ void mpc::pub_cont() {
 }
 
 void mpc::pub_traj() {
-    /*
+
     // Input a list of pose messages as a pointer
     geometry_msgs::PoseArray p;
     geometry_msgs::Pose pos;
 
     // Save ego trajectory in p
-    for (int i = 0; i < N; i++) {
-        pos.position.x = x[n_st * i + 0].get(GRB_DoubleAttr_X);
-        pos.position.y = x[n_st * i + 1].get(GRB_DoubleAttr_X);
-        pos.position.z = x[n_st * i + 2].get(GRB_DoubleAttr_X);
+    for (int n = 0; n < N; n++) {
+        pos.position.x = x_bar[n][0];
+        pos.position.y = x_bar[n][1];
+        pos.position.z = x_bar[n][2];
 
         // Maybe add later, remember orientation is in quaternion, and coordinates used here are RPY
 
@@ -527,13 +529,8 @@ void mpc::pub_traj() {
 
         p.poses.push_back(pos);
     }
-    std::string frame_id = "world";
-    p.header.frame_id = frame_id;
-    pubTrajectory.publish(p);
-
-    ros::spinOnce();
-    */
-
+    p.header.frame_id = "world";
+    pub_to_rviz.publish(p);
 }
 
 double mpc::score_traj(const double* u) {
@@ -989,7 +986,7 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
     }
 
     pub_cont();
-    //pubTraj();
+    pub_traj();
 
     // Printing
 
