@@ -28,7 +28,8 @@ public:
         model.update();
         
         sub_to_gtp = node.subscribe(name + "/gtp", 1, &mpc::callback, this);
-        pub_to_cont = node.advertise<geometry_msgs::Quaternion>(name + "/control", 2);
+        pub_to_cont = node.advertise<geometry_msgs::Quaternion>(name + "/control/u", 2);
+        pub_to_sim = node.advertise<geometry_msgs::Quaternion>(name + "/control", 2);
         pub_to_rviz = node.advertise<nav_msgs::Path>(name + "/mpc_rviz", 2);
         
         double llb = 0;
@@ -208,7 +209,7 @@ public:
 
     double x0[n_st];
     double u0[N][n_con];
-    ros::Publisher pub_to_cont;
+    ros::Publisher pub_to_cont, pub_to_sim;
     ros::Publisher pub_to_rviz;
 
 private:
@@ -436,7 +437,8 @@ void mpc::pub_cont() {
     // Throttle, RPY rates
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
 
-    geometry_msgs::Quaternion cont;
+    geometry_msgs::Quaternion cont_to_sim;
+    geometry_msgs::Quaternion cont_to_controller;
     // u0 from the model
     double U[4] = {
         u0[0][0],
@@ -460,18 +462,19 @@ void mpc::pub_cont() {
     }
 
     // Filling up the message
-    // cont.x = U[0];
-    // cont.y = x1[6];
-    // cont.z = x1[7];
-    // cont.w = x1[8];
+    cont_to_sim.x = U[0]; // Throttle
+    cont_to_sim.y = x1[6]; // Roll angle
+    cont_to_sim.z = x1[7]; // Pitch angle
+    cont_to_sim.w = x1[11]; // Yaw rate
 
-    cont.x = U[0];
-    cont.y = U[1];
-    cont.z = U[2];
-    cont.w = U[3];
+    cont_to_controller.x = U[0];
+    cont_to_controller.y = U[1];
+    cont_to_controller.z = U[2];
+    cont_to_controller.w = U[3];
 
     // Publishing the message
-    pub_to_cont.publish(cont);
+    pub_to_cont.publish(cont_to_controller);
+    pub_to_sim.publish(cont_to_sim);
 
     ros::spinOnce();
 }
