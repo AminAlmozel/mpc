@@ -29,7 +29,7 @@ public:
         
         sub_to_gtp = node.subscribe(name + "/gtp", 1, &mpc::callback, this);
         pub_to_cont = node.advertise<geometry_msgs::Quaternion>(name + "/control", 2);
-        pub_to_rviz = node.advertise<geometry_msgs::PoseArray>(name + "/mpc_rviz", 2);
+        pub_to_rviz = node.advertise<nav_msgs::Path>(name + "/mpc_rviz", 2);
         
         double llb = 0;
         double lub = 1;
@@ -436,71 +436,39 @@ void mpc::pub_cont() {
     // Throttle, RPY rates
     // Publish a 4d vector (Overloaded as a quaternion message for convenience) as the 4 control inputs to the quadcopter
 
-    /*
-    std::cout << "xf: ";
-    for(int i = 0; i < n_st; i++){
-        std::cout << x[(N - 1) * n_st + i].get(GRB_DoubleAttr_X) << ", ";
-        if ((i + 1) % 3 == 0){std::cout << std::endl;}
-    }
-
-    std::cout << "u[i]: ";
-    for(int i = 0; i < N; i++){
-        std::cout << u[i* n_con + 0].get(GRB_DoubleAttr_X) << ", ";
-        //if ((i + 1) % 3 == 0){std::cout << std::endl;}
-    }
-
-    std::cout << "p[i]: ";
-    for(int i = 0; i < 3 * N; i++){
-        std::cout << p[i].get(GRB_DoubleAttr_X) << ", ";
-        if ((i + 1) % 3 == 0){std::cout << std::endl;}
-    }
-    */
     geometry_msgs::Quaternion cont;
-    try {
-        // u0 from the model
-        double U[4] = {
-            u0[0][0],
-            u0[0][1],
-            u0[0][2],
-            u0[0][3]
-        };
+    // u0 from the model
+    double U[4] = {
+        u0[0][0],
+        u0[0][1],
+        u0[0][2],
+        u0[0][3]
+    };
 
-        // // Trouttle angle
-        // double U[4] = {
-        //     u0[0][0],
-        //     x[n_st + 6].get(GRB_DoubleAttr_X), // Roll
-        //     x[n_st + 7].get(GRB_DoubleAttr_X), // Pitch
-        //     x[n_st + 8].get(GRB_DoubleAttr_X)  // Yaw
-        // };
+    double discretization = 10;
+    double dt_discretization = dt / 10;
+    double x1[n_st];
+    double xdot[n_st];
+    double x_next[n_st];
 
-        // // Trouttle angle rates
-        // double U[4] = {
-        //     u0[0][0],
-        //     x[n_st + 9].get(GRB_DoubleAttr_X), // Roll
-        //     x[n_st + 10].get(GRB_DoubleAttr_X), // Pitch
-        //     x[n_st + 11].get(GRB_DoubleAttr_X)  // Yaw
-        // };
-            // Filling up the message
-        cont.x = U[0];
-        cont.y = U[1];
-        cont.z = U[2];
-        cont.w = U[3];
+    memcpy(x1, x0, sizeof(double) * n_st);
+
+    for (int i = 0; i < int(discretization); i++) {
+        nl_model_xdot(x1, U, xdot);
+        x_next[i] = x1[i] + xdot[i] * dt_discretization;
+        memcpy(x1, x_next, sizeof(double) * n_st);
     }
 
-    catch (GRBException e)
-    {
-        double U[4] = { u_bar, 0, 0, 0 };
+    // Filling up the message
+    // cont.x = U[0];
+    // cont.y = x1[6];
+    // cont.z = x1[7];
+    // cont.w = x1[8];
 
-        // Filling up the message
-        cont.x = U[0];
-        cont.y = U[1];
-        cont.z = U[2];
-        cont.w = U[3];
-    }
-    catch (...)
-    {
-        cout << "Error during optimization" << endl;
-    }
+    cont.x = U[0];
+    cont.y = U[1];
+    cont.z = U[2];
+    cont.w = U[3];
 
     // Publishing the message
     pub_to_cont.publish(cont);
@@ -509,28 +477,18 @@ void mpc::pub_cont() {
 }
 
 void mpc::pub_traj() {
+    nav_msgs::Path strat;
+    // geometry_msgs::PoseArray strat;
+    geometry_msgs::PoseStamped pos = geometry_msgs::PoseStamped(); 
+    strat.header.frame_id = "world";
 
-    // Input a list of pose messages as a pointer
-    geometry_msgs::PoseArray p;
-    geometry_msgs::Pose pos;
-
-    // Save ego trajectory in p
-    for (int n = 0; n < N; n++) {
-        pos.position.x = x_bar[n][0];
-        pos.position.y = x_bar[n][1];
-        pos.position.z = x_bar[n][2];
-
-        // Maybe add later, remember orientation is in quaternion, and coordinates used here are RPY
-
-        //pos.orientation.x = x[n_st * i + 0].get(GRB_DoubleAttr_X);
-        //pos.orientation.y = x[n_st * i + 1].get(GRB_DoubleAttr_X);
-        //pos.orientation.z = x[n_st * i + 2].get(GRB_DoubleAttr_X);
-
-
-        p.poses.push_back(pos);
+    for (int n = 0; n < N; n++){
+        pos.pose.position.x = x_bar[n][0];
+        pos.pose.position.y = x_bar[n][1];
+        pos.pose.position.z = x_bar[n][2];
+        strat.poses.push_back(pos);
     }
-    p.header.frame_id = "world";
-    pub_to_rviz.publish(p);
+    pub_to_rviz.publish(strat);
 }
 
 double mpc::score_traj(const double* u) {
