@@ -350,7 +350,7 @@ void mpc::add_soft_constraint() {
         }
     }
 
-    double c = 1000;
+    double c = 10000;
     double W[6][6] =
     { {c, 0, 0, 0, 0, 0},
     {0, c, 0, 0, 0, 0},
@@ -447,25 +447,49 @@ void mpc::pub_cont() {
         u0[0][3]
     };
 
-    double discretization = 10;
-    double dt_discretization = dt / 10;
-    double x1[n_st];
-    double xdot[n_st];
-    double x_next[n_st];
+    // double discretization = 10;
+    // double dt_discretization = dt / 10;
+    // double x1[n_st];
+    // double xdot[n_st];
+    // double x_next[n_st];
 
-    memcpy(x1, x0, sizeof(double) * n_st);
+    // memcpy(x1, x0, sizeof(double) * n_st);
 
-    for (int i = 0; i < int(discretization); i++) {
-        nl_model_xdot(x1, U, xdot);
-        x_next[i] = x1[i] + xdot[i] * dt_discretization;
-        memcpy(x1, x_next, sizeof(double) * n_st);
-    }
+    // for (int i = 0; i < int(discretization); i++) {
+    //     nl_model_xdot(x1, U, xdot);
+    //     for (int j = 0; j < n_st; j++){
+    //         x_next[j] = x1[j] + xdot[j] * dt_discretization;
+    //     }
+    //     // cout << "x1: ";
+    //     // for (int i = 0; i < n_st; i++){
+    //     //     cout << x1[i] << ", ";
+    //     // }
+    //     // cout << endl;
+    //     // cout << "xdot * dt: ";
+    //     // for (int i = 0; i < n_st; i++){
+    //     //     cout << xdot[i] * dt_discretization << ", ";
+    //     // }
+    //     // cout << endl;
+    //     memcpy(x1, x_next, sizeof(double) * n_st);
+    // }
 
-    // Filling up the message
-    cont_to_sim.x = U[0]; // Throttle
-    cont_to_sim.y = x1[6]; // Roll angle
-    cont_to_sim.z = x1[7]; // Pitch angle
-    cont_to_sim.w = x1[11]; // Yaw rate
+    // cout << "dt_discretization: " << dt_discretization << endl;
+    // cout << "x0: ";
+    // for (int i = 0; i < n_st; i++){
+    //     cout << x0[i] << ", ";
+    // }
+    // cout << endl;
+    // cout << "x1: ";
+    // for (int i = 0; i < n_st; i++){
+    //     cout << x1[i] << ", ";
+    // }
+    // cout << endl;
+
+    // // Filling up the message
+    // cont_to_sim.x = U[0]; // Throttle
+    // cont_to_sim.y = x1[6]; // Roll angle
+    // cont_to_sim.z = x1[7]; // Pitch angle
+    // cont_to_sim.w = x1[8]; // Yaw angle
 
     cont_to_controller.x = U[0];
     cont_to_controller.y = U[1];
@@ -474,7 +498,7 @@ void mpc::pub_cont() {
 
     // Publishing the message
     pub_to_cont.publish(cont_to_controller);
-    pub_to_sim.publish(cont_to_sim);
+    // pub_to_sim.publish(cont_to_sim);
 
     ros::spinOnce();
 }
@@ -926,7 +950,7 @@ void mpc::set_initial_state(const geometry_msgs::PoseArray::ConstPtr& path) {
 
 void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
     //ROS_INFO_STREAM("Recieved Pose Array!");
-    int L = 15;
+    int L = 5;
     // TODO: Add collision constraints
     //collision(); // Adding collision constraints
     set_initial_state(path);
@@ -946,11 +970,7 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
         }
     }
 
-    pub_cont();
-    pub_traj();
-
     // Printing
-
     std::cout << "x[" << nn  << "]:";
     for (int i = 0; i < n_st; i++) {
         std::cout << x0[i] << ", ";
@@ -967,6 +987,9 @@ void mpc::callback(const geometry_msgs::PoseArray::ConstPtr& path) {
     }
     std::cout << std::endl;
     nn++;
+
+    pub_cont();
+    pub_traj();
 }
 
 int main(int argc, char* argv[]) {
@@ -993,7 +1016,7 @@ int main(int argc, char* argv[]) {
     cont.z = U[2];
     cont.w = U[3];
     ros::Duration(1.0).sleep();
-    ego.pub_to_cont.publish(cont);
+    // ego.pub_to_cont.publish(cont);
 
     //x[20]:1.02383, 0.23585, 1.00095, 0.184719, -0.518006, 0.0487062, -0.0657238, 0.122437, 4.93842, 0.69976, -0.700007, 2.80343,
     ros::spin();
